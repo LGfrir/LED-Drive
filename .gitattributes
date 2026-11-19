@@ -1,0 +1,7 @@
+# GitHub Linguist: keep the language bar focused on the ESP-IDF firmware.
+# The Android client is first-party code, but it should not dominate the
+# repository language statistics.
+"Android APP/**" linguist-detectable=false
+
+# The Python under docs is a PDF build helper, not firmware.
+ESP-IDF/docs/** linguist-documentation
