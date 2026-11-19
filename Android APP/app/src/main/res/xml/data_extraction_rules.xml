@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="preset-cache" />
+        <exclude domain="file" path="io-schedule" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="preset-cache" />
+        <exclude domain="file" path="io-schedule" />
+    </device-transfer>
+</data-extraction-rules>
