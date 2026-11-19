@@ -1,0 +1,139 @@
+/**
+ * @file main.c
+ * @author LG_frir
+ * @date 2026-11-11
+ * @brief 两路灯带，每路 160 颗、三段 32 + 96 + 32。
+ *
+ * IO1：GPIO14，段 id 1-3
+ * IO2：GPIO4， 段 id 4-6
+ *
+ * 只有先建的那一路能拿到 ESP32-S3 唯一的 RMT DMA 通道，另一路走 48 符号中断补数。
+ */
+
+#include "driver/bt/NimBLE.h"
+#include "driver/led_strip/light_mode_driver.h"
+#include "driver/preset/light_preset.h"
+#include "driver/timer/local_clock.h"
+#include "driver/timer/time_sync.h"
+#include "driver/ws2812/ws2812_rmt.h"
+#include "task/clock_scheduler.h"
+#include "task/gatt_svc.h"
+
+#include "esp_log.h"
+#include "nvs_flash.h"
+
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+static const char *TAG = "main";
+
+/*
+ * 两路，每路 160 颗，三段 32 + 96 + 32。
+ *
+ * ESP32-S3 的 4 个 RMT 发送通道里只有【最后一个】能挂 DMA
+ * （见 esp_driver_rmt/src/rmt_tx.c 的 rmt_tx_register_to_group），
+ * 而且这个通道被先建的那一路拿走。下面按 io_id 升序建，
+ * 所以 IO1 拿到 DMA，IO2 只能用 48 符号中断补数。
+ *
+ * 48 符号 = 60 us 一块的补数截止期，这是 IO2 先天比 IO1 脆弱的原因。
+ * led_count 相同时 by_leds_desc 按 io_id 升序排，保证每次启动分配结果一致。
+ */
+static const light_seg_desc_t s_segs_io1[] = {
+    { .id = 1, .length = 32, .name = "右" },
+    { .id = 2, .length = 96, .name = "中" },
+    { .id = 3, .length = 32, .name = "左" },
+};
+
+static const light_seg_desc_t s_segs_io2[] = {
+    { .id = 4, .length = 32, .name = "右" },
+    { .id = 5, .length = 96, .name = "中" },
+    { .id = 6, .length = 32, .name = "左" },
+};
+
+typedef struct {
+    uint8_t io_id;
+    const char *name; /* 显示名，随拓扑包一起发给 App */
+    gpio_num_t gpio;
+    uint16_t led_count;
+    const light_seg_desc_t *segs;
+    uint8_t seg_count;
+} io_desc_t;
+
+static const io_desc_t s_ios[] = {
+    { .io_id = 1, .name = "笔记本", .gpio = GPIO_NUM_14, .led_count = 160, .segs = s_segs_io1, .seg_count = 3 },
+    { .io_id = 2, .name = "手办",   .gpio = GPIO_NUM_4,  .led_count = 160, .segs = s_segs_io2, .seg_count = 3 },
+};
+
+/*
+ * RMT 有 4 个发送通道，但能同时挂 DMA 的更少：实测第 4 路会拿到
+ * "no free tx channels" 然后退回 48 符号中断补数（60 us 一块，
+ * 500 颗灯要补 250 次/帧，必然断流）。
+ * 所以按灯珠数从大到小创建，保证降级永远落在最小的那条灯带上，
+ * 而不是"谁排在第 4 个谁倒霉"。
+ */
+static int by_leds_desc(const void *a, const void *b)
+{
+    const io_desc_t *x = a;
+    const io_desc_t *y = b;
+    if (x->led_count != y->led_count) {
+        return x->led_count < y->led_count ? 1 : -1;
+    }
+    return (int)x->io_id - (int)y->io_id;
+}
+
+void app_main(void) 
+{
+    esp_err_t err = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        err = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(err);
+
+    /* 本地时间按中国标准时间解释，调度表里的时间点也是本地时间 */
+    setenv("TZ", "CST-8", 1);
+    tzset();
+
+    local_clock_init();
+    ESP_ERROR_CHECK(light_preset_init());
+
+    /* 按灯珠数从大到小建，大的先拿 DMA（见 by_leds_desc 的说明） */
+    const size_t io_total = sizeof(s_ios) / sizeof(s_ios[0]);
+    io_desc_t order[sizeof(s_ios) / sizeof(s_ios[0])];
+    memcpy(order, s_ios, sizeof(order));
+    qsort(order, io_total, sizeof(order[0]), by_leds_desc);
+
+    for (size_t i = 0; i < io_total; i++) {
+        const io_desc_t *d = &order[i];
+        ws2812_rmt_handle_t *strip = NULL;
+        const ws2812_rmt_config_t strip_cfg = {
+            .gpio = d->gpio,
+            .led_count = d->led_count,
+        };
+        ESP_ERROR_CHECK(ws2812_rmt_init(&strip_cfg, &strip));
+        ESP_ERROR_CHECK(light_io_create(d->io_id, d->name, d->led_count,
+                                        255, 20,
+                                        light_show_rmt, strip,
+                                        d->segs, d->seg_count,
+                                        ws2812_rmt_has_dma(strip)));
+        ESP_LOGI(TAG, "IO %u「%s」就绪：GPIO%d，%u 颗，%u 段，%s，刷新下限 %u ms",
+                 d->io_id, d->name, (int)d->gpio, d->led_count, d->seg_count,
+                 ws2812_rmt_has_dma(strip) ? "DMA" : "48符号补数",
+                 light_refresh_floor_for(d->led_count, ws2812_rmt_has_dma(strip)));
+    }
+    ESP_LOGI(TAG, "共 2 路、6 个灯段，每路 160 颗（32+96+32）");
+    ESP_LOGW(TAG, "只有先建的一路能拿到 RMT DMA；另一路走 48 符号补数，"
+                  "补数截止期 60 us，抗抖动能力弱很多");
+
+    /* 灯带都建好之后再起落盘任务：它要能遍历到全部 IO / 灯段 */
+    ESP_ERROR_CHECK(light_persist_init());
+
+    /* 调度器要在灯段建好之后启动：时间模式 + 未对时会立刻静默 */
+    ESP_ERROR_CHECK(clock_scheduler_init());
+
+    time_sync_init(gatt_svc_time_request);
+
+    ESP_LOGI(TAG, "共 1 路、3 个灯段（GPIO14 / 96 颗）");
+    nimble_init_as_prph();
+}

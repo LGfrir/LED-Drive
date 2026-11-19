@@ -1,0 +1,26 @@
+idf_component_register(
+    SRCS
+        "src/main.c"
+        "src/driver/ws2812/ws2812_rmt.c"
+        "src/driver/ws2812/ws2812_spi.c"
+        "src/driver/bt/NimBLE.c"
+        "src/driver/led_strip/light_mode.c"
+        "src/driver/led_strip/light_mode_driver.c"
+        "src/driver/nvs/nvs_flash_save.c"
+        "src/driver/preset/light_preset.c"
+        "src/driver/timer/local_clock.c"
+        "src/driver/timer/time_sync.c"
+        "src/task/clock_scheduler.c"
+        "src/task/gatt_svc.c"
+        "src/task/gatt_time_svc.c"
+    INCLUDE_DIRS
+        "inc"
+    REQUIRES
+        bt
+        nvs_flash
+        esp_driver_gpio
+        esp_driver_rmt
+        esp_driver_spi
+        esp_timer
+        freertos
+)
