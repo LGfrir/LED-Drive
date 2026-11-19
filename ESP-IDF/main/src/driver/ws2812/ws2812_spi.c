@@ -11,12 +11,18 @@
 #include <string.h>
 
 #include "esp_log.h"
+#include "esp_timer.h"
 
 #define TAG "ws2812_spi"
 
 /* 3.2 MHz 下 4 个 SPI 位 = 1.25 us，对齐 WS2812 的一个位时间 */
 #define WS2812_SPI_CLOCK_HZ  3200000
-#define WS2812_SPI_RESET_BYTES 24
+/*
+ * 复位低电平：24 字节只有 60 us。WS2812B 的最低要求是 50 us，余量太薄；
+ * 老 WS2812 要 280 us。这里按 280 us 给足：280 us × 3.2 MHz / 8 = 112 字节。
+ * 多出的 52 字节只多花 130 us，对 20 ms 的刷新周期没有影响。
+ */
+#define WS2812_SPI_RESET_BYTES 112
 
 struct ws2812_spi_bus {
     spi_host_device_t host;
@@ -166,7 +172,29 @@ esp_err_t ws2812_spi_show(ws2812_spi_handle_t *bus)
         .length = bus->encoded_bytes * 8,
         .tx_buffer = bus->encoded,
     };
-    return spi_device_transmit(bus->device, &trans);
+
+    int64_t start_us = esp_timer_get_time();
+    esp_err_t err = spi_device_transmit(bus->device, &trans);
+    int64_t cost_us = esp_timer_get_time() - start_us;
+
+    /* 首帧打一条：确认 SPI 真的把整帧发出去了，顺带看硬件耗时。 */
+    static bool s_first_frame_logged;
+    if (!s_first_frame_logged) {
+        s_first_frame_logged = true;
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "首帧发送完成：%u 字节，%lld us",
+                     (unsigned)bus->encoded_bytes, (long long)cost_us);
+        } else {
+            ESP_LOGE(TAG, "首帧发送失败：%s", esp_err_to_name(err));
+        }
+    } else if (err != ESP_OK) {
+        static bool s_error_logged;
+        if (!s_error_logged) {
+            s_error_logged = true;
+            ESP_LOGE(TAG, "SPI 发送失败：%s", esp_err_to_name(err));
+        }
+    }
+    return err;
 }
 
 uint16_t ws2812_spi_led_count(const ws2812_spi_handle_t *bus)

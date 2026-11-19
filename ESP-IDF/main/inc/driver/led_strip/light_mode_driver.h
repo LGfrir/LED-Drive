@@ -35,6 +35,9 @@ typedef struct {
 /*
  * 新建一个 IO。segs 按数据线方向从前到后排，长度之和不能超过 led_count。
  * 多出来的灯珠保持灭。灯段 ID 全机唯一。成功后自己起刷新任务。
+ *
+ * dma：这一路是否有硬件 DMA（RMT DMA 或 SPI DMA）。
+ *      true 时刷新下限只按物理发送时间算；false 才按 48 符号补数的中断率抬高。
  */
 esp_err_t light_io_create(uint8_t io_id, const char *name, uint16_t led_count,
                           uint8_t brightness, uint16_t refresh_ms,
@@ -44,6 +47,9 @@ esp_err_t light_io_create(uint8_t io_id, const char *name, uint16_t led_count,
 
 /* 把一段 RGB 交给 RMT 灯带发出去。show_ctx 是 ws2812_rmt_handle_t *。 */
 esp_err_t light_show_rmt(void *ctx, const color_t *pixels, uint16_t count);
+
+/* 把一段 RGB 交给 SPI 灯带发出去。show_ctx 是 ws2812_spi_handle_t *。 */
+esp_err_t light_show_spi(void *ctx, const color_t *pixels, uint16_t count);
 
 esp_err_t light_io_set_brightness(uint8_t io_id, uint8_t brightness);
 esp_err_t light_io_set_refresh(uint8_t io_id, uint16_t refresh_ms);

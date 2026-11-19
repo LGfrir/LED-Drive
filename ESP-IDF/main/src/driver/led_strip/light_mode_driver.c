@@ -6,6 +6,7 @@
 
 #include "driver/led_strip/light_mode_driver.h"
 #include "driver/nvs/nvs_flash_save.h"
+#include "driver/ws2812/ws2812_spi.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -312,6 +313,22 @@ esp_err_t light_show_rmt(void *ctx, const color_t *pixels, uint16_t count)
         ws2812_rmt_set_pixel(bus, i, pixels[i].r, pixels[i].g, pixels[i].b);
     }
     return ws2812_rmt_show(bus);
+}
+
+esp_err_t light_show_spi(void *ctx, const color_t *pixels, uint16_t count)
+{
+    ws2812_spi_handle_t *bus = ctx;
+    if (bus == NULL || pixels == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    uint16_t n = ws2812_spi_led_count(bus);
+    if (count < n) {
+        n = count;
+    }
+    for (uint16_t i = 0; i < n; i++) {
+        ws2812_spi_set_pixel(bus, i, pixels[i].r, pixels[i].g, pixels[i].b);
+    }
+    return ws2812_spi_show(bus);
 }
 
 esp_err_t light_io_create(uint8_t io_id, const char *name, uint16_t led_count,
