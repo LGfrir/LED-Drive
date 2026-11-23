@@ -1,5 +1,7 @@
 package com.lgfrir.leddrivebt.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -24,14 +26,18 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -39,27 +45,36 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.lgfrir.leddrivebt.ble.OtaLocalServer
 import com.lgfrir.leddrivebt.ui.theme.AppType
 import com.lgfrir.leddrivebt.ui.theme.MinTouchTarget
 import com.lgfrir.leddrivebt.ui.theme.Radius
 import com.lgfrir.leddrivebt.ui.theme.Space
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 /*
  * OTA 固件升级页面。
  *
- * 远程服务器模式已经通过 BLE 接通（见 [OtaBleLink]）：
- *   - 检查更新只校验 WiFi/URL 参数并读设备版本，设备端没有独立的清单检查接口；
- *   - 开始升级把 WiFi、URL 打包成 START 命令发给设备，由设备自己下载；
- *   - 升级中每秒读一次 ota_stat，驱动下面的阶段和进度。
- * 手机本地热点模式（手机当固件服务器）还没实现，只保留提示，不会发真实命令，
- * 也不会出现假的“升级成功”。
+ * 两种升级方式都通过 BLE 接通（见 [OtaBleLink]）：
+ *   - 远程服务器：把 WiFi 和 HTTPS 地址打包成 START 命令，由设备自己下载；
+ *   - 手机本地服务：先把固件复制到手机缓存，启动本机 HTTP 服务，再把手机 WiFi IPv4、
+ *     端口、随机 token 和文件 SHA-256 打包进 START，设备连同一个 WiFi 来手机下载。
+ * 两种方式都由设备自己写固件；APP 每秒读一次 ota_stat 驱动阶段和进度，
+ * 本地服务在升级结束、失败或取消时关闭。手机热点（LocalOnlyHotspot）模式下一步再做，
+ * 当前只支持手机和灯带连同一个 WiFi，界面不会把它说成热点已经实现。
  */
 
-/** 固件来源。远程服务器由设备自己走 HTTPS 下载；本地热点由手机当固件服务器。 */
+/**
+ * 固件来源。
+ *
+ * [Hotspot] 这个名字为了和已有代码/协议保持一致而保留；当前实现的是
+ * “手机和灯带连同一个 WiFi，手机当本地 HTTP 服务器”，不是手机开热点。
+ */
 enum class OtaSource(val label: String, val blurb: String) {
     Server("远程服务器", "设备按 HTTPS 地址下载固件"),
-    Hotspot("手机本地热点", "手机开热点并充当固件服务器"),
+    Hotspot("手机本地服务", "手机提供固件，需和灯带连同一 WiFi"),
 }
 
 /** 页面上的升级阶段。 */
@@ -82,14 +97,20 @@ data class OtaUiState(
     val source: OtaSource = OtaSource.Server,
     /** 远程模式：固件服务器地址，必须以 https:// 开头。 */
     val serverUrl: String = "",
-    /** 远程模式：设备要连接的 WiFi 名称，不能为空。 */
+    /** 远程模式：设备要连接的 WiFi 名称，不能为空。本地模式也要填手机当前连的 WiFi。 */
     val wifiSsid: String = "",
-    /** 远程模式：WiFi 密码，开放网络可以留空。 */
+    /** 远程模式：WiFi 密码，开放网络可以留空。本地模式同样会发给设备。 */
     val wifiPassword: String = "",
-    /** 本地热点模式：手机端固件服务的端口，当前只做展示占位。 */
-    val localPort: Int = 8080,
-    /** 本地热点模式：选中的固件文件，当前恒为 null（文件选择占位）。 */
-    val localFile: String? = null,
+    /** 本地模式：手机端固件服务的端口。 */
+    val localPort: Int = OtaLocalServer.DEFAULT_PORT,
+    /** 本地模式：已经复制到手机缓存的固件。只放文件和摘要，不放文件字节。 */
+    val localFile: OtaLocalFirmware? = null,
+    /** 本地模式：最近一次读到的手机 WiFi IPv4。null = 没连 WiFi 或读不到。 */
+    val localIp: String? = null,
+    /** 本地模式：本机 HTTP 服务是否在运行（只在升级期间为 true）。 */
+    val localServiceRunning: Boolean = false,
+    /** 本地模式：本机 HTTP 服务地址，运行期间非空，方便排查。 */
+    val localServiceUrl: String? = null,
     /** 设备当前固件版本。null = 还没读到。 */
     val currentVersion: String? = null,
     /** 检查更新后拿到的目标版本。 */
@@ -106,8 +127,9 @@ data class OtaRequest(
     val serverUrl: String = "",
     val wifiSsid: String = "",
     val wifiPassword: String = "",
-    val localPort: Int = 8080,
-    val localFile: String? = null,
+    val localPort: Int = OtaLocalServer.DEFAULT_PORT,
+    /** 本地模式：已经导入缓存的固件和摘要；远程模式为 null。 */
+    val localFirmware: OtaLocalFirmware? = null,
 )
 
 /**
@@ -127,7 +149,14 @@ data class OtaActions(
     val onServerUrl: (String) -> Unit,
     val onWifiSsid: (String) -> Unit,
     val onWifiPassword: (String) -> Unit,
-    val onPickLocalFile: () -> Unit,
+    /** 文件选择器已经拿到 Uri，开始复制并算 SHA-256。 */
+    val onLocalImportStarted: () -> Unit,
+    /** 固件复制完成，把文件名/大小/SHA-256 交给状态机。 */
+    val onLocalFirmware: (OtaLocalFirmware) -> Unit,
+    /** 导入失败、用户取消、或读不到 WiFi 时的真实错误。 */
+    val onLocalFileProblem: (String) -> Unit,
+    /** 重新读一次手机 WiFi IPv4。 */
+    val onRefreshLocalNetwork: () -> Unit,
     val onReadVersion: () -> Unit,
     val onCheck: () -> Unit,
     val onStart: () -> Unit,
@@ -140,8 +169,13 @@ data class OtaActions(
  * link 默认由 LightViewModel 装成 [OtaBleLink]；没装时点按钮只会得到一句
  * “设备端 OTA 服务尚未接入”的提示。接线后由 [OtaLink] 的实现调用 [beginCheck] 等方法推进状态，
  * 界面自动跟随。
+ *
+ * [wifiIpv4] 是手机 WiFi IPv4 的读取器，由 LightViewModel 用 Application Context 注入；
+ * 读不到返回 null，界面和 [requestOrNull] 都会给出“请先连接 WiFi”的真实提示。
  */
-class OtaController {
+class OtaController(
+    private val wifiIpv4: (() -> String?)? = null,
+) {
     var state by mutableStateOf(OtaUiState())
         private set
 
@@ -155,7 +189,10 @@ class OtaController {
         onServerUrl = { setServerUrl(it) },
         onWifiSsid = { setWifiSsid(it) },
         onWifiPassword = { setWifiPassword(it) },
-        onPickLocalFile = { pickLocalFile() },
+        onLocalImportStarted = { localImportStarted() },
+        onLocalFirmware = { setLocalFirmware(it) },
+        onLocalFileProblem = { localFileProblem(it) },
+        onRefreshLocalNetwork = { refreshLocalNetwork() },
         onReadVersion = { readVersion() },
         onCheck = { check() },
         onStart = { start() },
@@ -166,6 +203,7 @@ class OtaController {
     fun selectSource(source: OtaSource) {
         if (state.phase.busy || state.source == source) return
         state = state.copy(source = source, message = "")
+        if (source == OtaSource.Hotspot) refreshLocalNetwork(quiet = true)
     }
 
     fun setServerUrl(url: String) {
@@ -178,6 +216,61 @@ class OtaController {
 
     fun setWifiPassword(password: String) {
         state = state.copy(wifiPassword = password, message = "")
+    }
+
+    /** 手机 WiFi IPv4 的当前值，取自注入的读取器；OtaBleLink 也用它拼 URL。 */
+    fun currentWifiIpv4(): String? = wifiIpv4?.invoke()
+
+    /**
+     * 重新读一次手机 WiFi IPv4。[quiet] = true 时只更新地址不写提示，
+     * 用于用户切到本地模式时静默刷新。
+     */
+    fun refreshLocalNetwork(quiet: Boolean = false) {
+        if (state.phase.busy) return
+        val ip = currentWifiIpv4()
+        state = state.copy(
+            localIp = ip,
+            message = when {
+                quiet -> state.message
+                ip == null -> "没有读到手机 WiFi 的 IPv4 地址。请先让手机连接 WiFi，再试本地升级。"
+                else -> "手机当前 WiFi 地址：$ip"
+            },
+        )
+    }
+
+    /** 文件选择器返回后，复制固件期间的状态提示。 */
+    fun localImportStarted() {
+        if (state.phase.busy) return
+        state = state.copy(message = "正在把固件复制到手机缓存并计算 SHA-256…")
+    }
+
+    /** 固件导入完成。本地模式下的“选择文件”真正落到这里。 */
+    fun setLocalFirmware(firmware: OtaLocalFirmware) {
+        if (state.phase.busy) return
+        state = state.copy(
+            localFile = firmware,
+            localIp = currentWifiIpv4() ?: state.localIp,
+            message = "已选择 ${firmware.name}（${formatByteCount(firmware.size)}），" +
+                "SHA-256 ${firmware.sha256.take(16)}…",
+        )
+    }
+
+    fun localFileProblem(message: String) {
+        if (state.phase.busy) return
+        state = state.copy(message = message.ifBlank { "读取固件文件失败。" })
+    }
+
+    /**
+     * 本地 HTTP 服务已启动。由 [OtaBleLink] 在 START 发出去之前调用，
+     * 页面据此显示服务状态和设备要访问的 URL。
+     */
+    fun localServiceStarted(ip: String, url: String) {
+        state = state.copy(localIp = ip, localServiceRunning = true, localServiceUrl = url)
+    }
+
+    /** 本地服务已关闭。终态、失败、取消都会走到这里。 */
+    fun localServiceStopped() {
+        state = state.copy(localServiceRunning = false, localServiceUrl = null)
     }
 
     /**
@@ -267,14 +360,6 @@ class OtaController {
         link.cancelUpdate()
     }
 
-    /**
-     * 本地热点模式的文件选择占位。等手机本地 HTTP 服务实现后才改成系统文件选择器，
-     * 选中后 `state = state.copy(localFile = name)`。
-     */
-    fun pickLocalFile() {
-        state = state.copy(message = "本地固件文件选择还没接入；手机本地 HTTP 服务下一步实现，本地热点升级不会发送命令。")
-    }
-
     /* ---------- 以下方法供 OtaLink 实现调用，用来驱动界面 ---------- */
 
     fun beginCheck() {
@@ -349,6 +434,7 @@ class OtaController {
 
     private fun requestOrNull(): OtaRequest? {
         val current = state
+        var ip = current.localIp
         val problem = when (current.source) {
             OtaSource.Server -> {
                 val url = current.serverUrl.trim()
@@ -363,12 +449,30 @@ class OtaController {
                     else -> null
                 }
             }
-            OtaSource.Hotspot ->
-                "手机本地 HTTP 服务下一步实现，本地热点升级还没有开始，不会向设备发送命令。"
+
+            OtaSource.Hotspot -> {
+                ip = currentWifiIpv4()
+                val firmware = current.localFile
+                val file = firmware?.file
+                when {
+                    firmware == null || file == null ->
+                        "请先选择固件文件；没有固件文件时本地服务不会启动，也不会向设备发送命令。"
+                    !file.isFile || file.length() <= 0L ->
+                        "本地固件缓存已经不在了，请重新选择固件文件。"
+                    ip == null ->
+                        "没有读到手机 WiFi 的 IPv4 地址。请先让手机连接 WiFi，再开始本地升级。"
+                    current.wifiSsid.trim().isEmpty() ->
+                        "请填写灯带要连接的 WiFi 名称；它必须和手机在同一个 WiFi。"
+                    else -> null
+                }
+            }
         }
         if (problem != null) {
-            state = current.copy(message = problem)
+            state = current.copy(message = problem, localIp = ip)
             return null
+        }
+        if (current.source == OtaSource.Hotspot) {
+            state = state.copy(localIp = ip)
         }
         return OtaRequest(
             source = current.source,
@@ -376,13 +480,17 @@ class OtaController {
             wifiSsid = current.wifiSsid.trim(),
             wifiPassword = current.wifiPassword,
             localPort = current.localPort,
-            localFile = current.localFile,
+            localFirmware = current.localFile,
         )
     }
 }
 
 /**
  * OTA 子页。内容全部是 APP 侧状态，BLE 命令由 [OtaController.link] 转发。
+ *
+ * 文件选择器放在这里而不是 controller 里：`OpenDocument` 必须由 Activity 的
+ * ActivityResult 注册表发起，controller 只是纯状态机。选中后先在 IO 线程把 Uri
+ * 复制进缓存并算 SHA-256，再把结果交给 actions。
  */
 @Composable
 fun OtaScreen(
@@ -390,6 +498,36 @@ fun OtaScreen(
     actions: OtaActions,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var importing by remember { mutableStateOf(false) }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) {
+            actions.onLocalFileProblem("没有选择固件文件，本地升级还缺少固件。")
+            return@rememberLauncherForActivityResult
+        }
+        importing = true
+        actions.onLocalImportStarted()
+        scope.launch {
+            try {
+                val firmware = OtaFirmwareStore.import(context, uri)
+                importing = false
+                actions.onLocalFirmware(firmware)
+            } catch (error: CancellationException) {
+                /* 页面已经离开：不要把它当成“读取失败”，把取消继续抛给协程。 */
+                throw error
+            } catch (error: Exception) {
+                importing = false
+                actions.onLocalFileProblem(error.message ?: "读取固件文件失败。")
+            }
+        }
+    }
+
+    /* 进入本地模式时静默读一次手机 IP；切换模式后不会反复触发。 */
+    LaunchedEffect(state.source) {
+        if (state.source == OtaSource.Hotspot) actions.onRefreshLocalNetwork()
+    }
+
     Column(
         modifier
             .fillMaxWidth()
@@ -401,13 +539,21 @@ fun OtaScreen(
         OtaSourceBlock(state, actions)
         when (state.source) {
             OtaSource.Server -> OtaServerBlock(state, actions)
-            OtaSource.Hotspot -> OtaHotspotBlock(state, actions.onPickLocalFile)
+            OtaSource.Hotspot -> OtaHotspotBlock(
+                state = state,
+                importing = importing,
+                onPickFile = {
+                    if (!state.phase.busy) picker.launch(arrayOf("*/*"))
+                },
+                onRefreshNetwork = actions.onRefreshLocalNetwork,
+                actions = actions,
+            )
         }
-        OtaRunBlock(state, actions)
+        OtaRunBlock(state, actions, importing)
     }
 }
 
-/** 页面顶部说清楚现在能做什么、还没有做什么，避免用户以为本地热点也能升级。 */
+/** 页面顶部说清楚两种模式各自做什么、本地模式的边界在哪里。 */
 @Composable
 private fun OtaNotice() {
     val palette = LocalPalette.current
@@ -421,11 +567,12 @@ private fun OtaNotice() {
             .border(1.dp, palette.warn.copy(alpha = 0.35f), shape)
             .padding(horizontal = Space.x3, vertical = Space.x3),
     ) {
-        Text("手机本地 HTTP 服务尚未实现", color = palette.warn, style = AppType.strong)
+        Text("本地升级：手机和灯带必须在同一个 WiFi", color = palette.warn, style = AppType.strong)
         Text(
-            "远程服务器升级已通过 BLE 接通：填写 WiFi 和固件地址后，由设备自己下载并写入新固件。" +
-                "手机本地热点模式只保留参数和提示，下一步实现手机本地 HTTP 服务；" +
-                "在那之前它不会向设备发送升级命令，也不会出现假的“升级成功”。",
+            "本地模式会先把固件复制到手机缓存，启动本机 HTTP 服务，再通过 BLE 把手机 WiFi 地址、" +
+                "端口、随机 token 和 SHA-256 发给灯带，由灯带自己下载。远程服务器模式保持原样。" +
+                "手机热点（LocalOnlyHotspot）和前台服务还没有实现：本页不能把手机变成热点，" +
+                "升级期间请让 App 留在前台。",
             color = palette.muted,
             style = AppType.caption,
             modifier = Modifier.padding(top = Space.x1),
@@ -482,7 +629,7 @@ private fun OtaSourceBlock(state: OtaUiState, actions: OtaActions) {
             )
         }
         Text(
-            "远程模式通过 BLE 让设备自己下载；本地热点模式还没实现，不会发送升级命令。",
+            "远程模式让设备按 HTTPS 地址自己下载；本地模式由手机提供固件，设备要通过同一个 WiFi 来手机取文件。两种模式都由设备自己写固件。",
             color = palette.muted,
             style = AppType.caption,
             modifier = Modifier.padding(top = Space.x2),
@@ -640,24 +787,102 @@ private fun OtaField(
 }
 
 @Composable
-private fun OtaHotspotBlock(state: OtaUiState, onPickLocalFile: () -> Unit) {
+private fun OtaHotspotBlock(
+    state: OtaUiState,
+    importing: Boolean,
+    onPickFile: () -> Unit,
+    onRefreshNetwork: () -> Unit,
+    actions: OtaActions,
+) {
     val palette = LocalPalette.current
+    val enabled = !state.phase.busy && !importing
+    val predictedUrl = state.localIp?.let {
+        "http://$it:${state.localPort}/${OtaLocalServer.FIRMWARE_PATH}"
+    }
     AcrylicGroup {
-        Text("手机本地热点", color = palette.text, style = AppType.strong)
+        Text("手机本地固件服务", color = palette.text, style = AppType.strong)
         Text(
-            "手机开热点，设备连入后从本机下载。",
+            "手机先启动一个本机 HTTP 服务，再把地址和 token 通过 BLE 发给灯带。" +
+                "灯带必须和手机连在同一个 WiFi；手机热点（LocalOnlyHotspot）模式下一步实现。",
             color = palette.muted,
             style = AppType.body,
             modifier = Modifier.padding(top = Space.x1),
         )
+        OtaFact("手机 WiFi IP", state.localIp ?: "未连接 WiFi")
         OtaFact("监听端口", "${state.localPort}")
-        OtaFact("固件文件", state.localFile ?: "未选择")
-        OutlinedButton(
-            onClick = onPickLocalFile,
-            modifier = Modifier.padding(top = Space.x2).heightIn(min = MinTouchTarget),
-        ) { Text("选择固件文件") }
+        OtaFact(
+            "服务状态",
+            when {
+                state.localServiceRunning -> "运行中"
+                state.phase.busy -> "启动中"
+                else -> "未启动（开始升级时启动）"
+            },
+        )
+        OtaFact("固件地址", state.localServiceUrl ?: predictedUrl ?: "连接 WiFi 后生成")
+        OtaFact("固件文件", state.localFile?.name ?: "未选择")
+        state.localFile?.let { firmware ->
+            OtaFact("文件大小", formatByteCount(firmware.size))
+            OtaFact("SHA-256", "${firmware.sha256.take(16)}…${firmware.sha256.takeLast(8)}")
+        }
+
+        Row(
+            Modifier.fillMaxWidth().padding(top = Space.x2),
+            horizontalArrangement = Arrangement.spacedBy(Space.x2),
+        ) {
+            OutlinedButton(
+                onClick = onRefreshNetwork,
+                enabled = enabled,
+                modifier = Modifier.weight(1f).heightIn(min = MinTouchTarget),
+            ) { Text("刷新手机 IP") }
+            OutlinedButton(
+                onClick = onPickFile,
+                enabled = enabled,
+                modifier = Modifier.weight(1f).heightIn(min = MinTouchTarget),
+            ) {
+                Text(
+                    when {
+                        importing -> "导入中…"
+                        state.localFile == null -> "选择固件文件"
+                        else -> "更换固件文件"
+                    },
+                )
+            }
+        }
+        if (state.localFile == null) {
+            Text(
+                "还没选择固件文件。点“选择固件文件”后会复制到手机缓存并算出 SHA-256；" +
+                    "没有文件时点“开始升级”只会提示先选择文件，不会向设备发送命令。",
+                color = palette.warn,
+                style = AppType.caption,
+                modifier = Modifier.padding(top = Space.x2),
+            )
+        }
+
         Text(
-            "手机本地 HTTP 服务下一步实现。端口和文件选择目前是占位，在这之前本地热点模式不会向设备发送任何命令。",
+            "灯带要连接的 WiFi",
+            color = palette.text,
+            style = AppType.strong,
+            modifier = Modifier.padding(top = Space.x3),
+        )
+        OtaField(
+            value = state.wifiSsid,
+            placeholder = "WiFi 名称（SSID，和手机同一个）",
+            keyboardType = KeyboardType.Text,
+            enabled = !state.phase.busy,
+            onValueChange = actions.onWifiSsid,
+        )
+        OtaField(
+            value = state.wifiPassword,
+            placeholder = "WiFi 密码（开放网络留空）",
+            keyboardType = KeyboardType.Password,
+            password = true,
+            enabled = !state.phase.busy,
+            onValueChange = actions.onWifiPassword,
+        )
+        Text(
+            "手机和灯带必须在同一个 WiFi；这里填的是那个 WiFi 的名称和密码，会随 START 命令发给设备。" +
+                "升级结束、失败或取消后，手机上的本地服务会自动关闭。升级期间请让 App 留在前台。" +
+                "如果路由器开启了 AP 隔离（客户端隔离），灯带会连不到手机；端口 8080 被别的 App 占用时，本地服务会启动失败并给出提示。",
             color = palette.muted,
             style = AppType.caption,
             modifier = Modifier.padding(top = Space.x2),
@@ -714,9 +939,11 @@ private fun OtaProgressBar(progress: Float) {
 }
 
 @Composable
-private fun OtaRunBlock(state: OtaUiState, actions: OtaActions) {
+private fun OtaRunBlock(state: OtaUiState, actions: OtaActions, importing: Boolean) {
     val palette = LocalPalette.current
     val busy = state.phase.busy
+    /* 导入固件期间不允许开始/检查，避免用旧文件或半截文件发 START。 */
+    val canRun = !busy && !importing
     AcrylicGroup {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(
@@ -773,18 +1000,26 @@ private fun OtaRunBlock(state: OtaUiState, actions: OtaActions) {
                 modifier = Modifier.padding(top = Space.x2),
             )
         }
+        if (importing) {
+            Text(
+                "正在导入固件文件（复制到手机缓存并计算 SHA-256），导入完成前不会开始升级。",
+                color = palette.muted,
+                style = AppType.caption,
+                modifier = Modifier.padding(top = Space.x2),
+            )
+        }
         Row(
             Modifier.fillMaxWidth().padding(top = Space.x3),
             horizontalArrangement = Arrangement.spacedBy(Space.x2),
         ) {
             OutlinedButton(
                 onClick = actions.onCheck,
-                enabled = !busy,
+                enabled = canRun,
                 modifier = Modifier.weight(1f).heightIn(min = 48.dp),
             ) { Text("检查更新") }
             Button(
                 onClick = actions.onStart,
-                enabled = !busy,
+                enabled = canRun,
                 modifier = Modifier.weight(1f).heightIn(min = 48.dp),
             ) { Text("开始升级") }
         }

@@ -18,6 +18,13 @@
         android:name="android.permission.BLUETOOTH_SCAN"
         android:usesPermissionFlags="neverForLocation" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <!-- 手机本地固件服务：监听 ServerSocket + 读当前 WiFi 的 IPv4。 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!--
+        targetSdk 35 不受 Android 17 本地网络权限强制影响；如果以后把 targetSdk 升到 37，
+        还要声明 ACCESS_LOCAL_NETWORK 并在运行时申请，否则 ServerSocket 的局域网访问会被拦。
+    -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission
         android:name="android.permission.NEARBY_WIFI_DEVICES"
