@@ -294,7 +294,8 @@ static void ota_run(void)
     ESP_LOGI(TAG, "update ready on %s", update->label);
 
     if (req.auto_reboot) {
-        vTaskDelay(pdMS_TO_TICKS(1200));
+        /* 给屏幕留出 REBOOT IN 3 -> 2 -> 1 -> REBOOTING 的显示时间。 */
+        vTaskDelay(pdMS_TO_TICKS(3600));
         esp_restart();
     }
     goto cleanup;

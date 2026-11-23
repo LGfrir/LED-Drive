@@ -45,6 +45,7 @@ static const char *TAG = "DASH";
 #define C_BLUE    LCD_RGB565(88, 150, 255)
 #define C_AMBER   LCD_RGB565(255, 186, 64)
 #define C_WARN    LCD_RGB565(255, 104, 76)
+#define C_RED     LCD_RGB565(235, 38, 52)     /* OTA reboot 反相底色 */
 #define C_LINE    LCD_RGB565(30, 46, 62)
 #define C_BAR_BG  LCD_RGB565(32, 48, 66)
 #define C_ON_DARK LCD_RGB565(6, 9, 16)
@@ -861,6 +862,28 @@ void dash_ota_update(uint8_t progress, const char *phase, const char *detail)
     if (fill > 0) {
         fb_rect(bar_x + 2, bar_y + 2, fill, bar_h - 4, C_ACCENT2);
     }
+    fb_flush();
+}
+
+void dash_ota_reboot(uint8_t seconds_left)
+{
+    if (s_fb == NULL) {
+        return;
+    }
+    s_ota_active = true;
+
+    char line[18];
+    fb_fill(C_RED);
+    fb_text_c(24, "OTA COMPLETE", 1, C_BG, C_RED);
+    if (seconds_left > 0) {
+        snprintf(line, sizeof(line), "REBOOT IN %u S", (unsigned)seconds_left);
+        fb_text_c(48, line, 2, C_BG, C_RED);
+        fb_text_c(78, "PLEASE WAIT", 1, C_BG, C_RED);
+    } else {
+        fb_text_c(48, "REBOOTING", 2, C_BG, C_RED);
+        fb_text_c(78, "PLEASE WAIT", 1, C_BG, C_RED);
+    }
+    fb_text_c(108, "DO NOT POWER OFF", 1, C_BG, C_RED);
     fb_flush();
 }
 

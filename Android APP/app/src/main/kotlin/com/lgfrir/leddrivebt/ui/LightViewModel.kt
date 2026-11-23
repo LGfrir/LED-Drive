@@ -122,6 +122,12 @@ class LightViewModel(app: Application) : AndroidViewModel(app) {
      */
     private val otaPrefs = app.getSharedPreferences("ota_prefs", 0)
     private val savedOta = OtaSaved(
+        source = runCatching {
+            OtaSource.valueOf(
+                otaPrefs.getString("source", OtaSource.Server.name)
+                    ?: OtaSource.Server.name,
+            )
+        }.getOrDefault(OtaSource.Server),
         ssid = otaPrefs.getString("ssid", "").orEmpty(),
         password = otaPrefs.getString("password", "").orEmpty(),
         localMode = runCatching {
@@ -139,6 +145,7 @@ class LightViewModel(app: Application) : AndroidViewModel(app) {
         initial = savedOta,
         onSave = { saved ->
             otaPrefs.edit()
+                .putString("source", saved.source.name)
                 .putString("ssid", saved.ssid)
                 .putString("password", saved.password)
                 .putString("local_mode", saved.localMode.name)

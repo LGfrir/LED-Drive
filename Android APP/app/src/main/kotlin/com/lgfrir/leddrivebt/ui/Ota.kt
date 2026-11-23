@@ -99,7 +99,7 @@ enum class OtaSource(val label: String, val blurb: String) {
 
 /** 本地升级的网络方式：手机自己开热点，或手机和灯带连同一个 WiFi。 */
 enum class OtaLocalMode(val label: String) {
-    Hotspot("手机热点（手动开启）"),
+    Hotspot("手机热点"),
     SameWifi("同一 WiFi"),
 }
 
@@ -151,6 +151,7 @@ data class OtaUiState(
 
 /** 本地持久化的 OTA 输入，不含固件文件。 */
 data class OtaSaved(
+    val source: OtaSource = OtaSource.Server,
     val ssid: String = "",
     val password: String = "",
     val localMode: OtaLocalMode = OtaLocalMode.Hotspot,
@@ -219,6 +220,7 @@ class OtaController(
 ) {
     var state by mutableStateOf(
         OtaUiState(
+            source = initial?.source ?: OtaSource.Server,
             localMode = initial?.localMode ?: OtaLocalMode.Hotspot,
             serverUrl = initial?.serverUrl ?: "",
             wifiSsid = initial?.ssid ?: "",
@@ -230,6 +232,7 @@ class OtaController(
     private fun persist() {
         onSave?.invoke(
             OtaSaved(
+                source = state.source,
                 ssid = state.wifiSsid,
                 password = state.wifiPassword,
                 localMode = state.localMode,
@@ -263,6 +266,7 @@ class OtaController(
     fun selectSource(source: OtaSource) {
         if (state.phase.busy || state.source == source) return
         state = state.copy(source = source, message = "")
+        persist()
         if (source == OtaSource.Hotspot) refreshLocalNetwork(quiet = true)
     }
 

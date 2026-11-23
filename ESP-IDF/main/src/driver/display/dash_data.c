@@ -60,6 +60,8 @@ static void dash_task(void *arg)
     bool ota_screen = false;
     TickType_t ota_hide_at = 0;
     TickType_t ota_frame_last = 0;
+    TickType_t ota_reboot_at = 0;
+    uint8_t last_reboot_left = 0xFF;
 
     while (1) {
         /* OTA 期间显示专用进度屏：10Hz 刷新，暂停普通仪表盘采样。 */
@@ -67,12 +69,33 @@ static void dash_task(void *arg)
         ota_get_status(&ota_now);
         bool ota_active = ota_now.state == OTA_CONNECTING_WIFI ||
                           ota_now.state == OTA_DOWNLOADING ||
-                          ota_now.state == OTA_VERIFYING ||
-                          ota_now.state == OTA_READY_REBOOT;
+                          ota_now.state == OTA_VERIFYING;
         bool ota_terminal = ota_now.state == OTA_FAILED ||
                             ota_now.state == OTA_ABORTED ||
                             ota_now.state == OTA_SUCCESS;
         TickType_t now_ticks = xTaskGetTickCount();
+
+        /* 准备重启：红色反相，REBOOT IN 3/2/1 S，最后 REBOOTING。 */
+        if (ota_now.state == OTA_READY_REBOOT) {
+            if (ota_reboot_at == 0) {
+                ota_reboot_at = now_ticks;
+                last_reboot_left = 0xFF;
+                ota_screen = true;
+            }
+            uint32_t elapsed_ms = (uint32_t)(now_ticks - ota_reboot_at) * portTICK_PERIOD_MS;
+            uint8_t left = (elapsed_ms < 1000u) ? 3
+                          : (elapsed_ms < 2000u) ? 2
+                          : (elapsed_ms < 3000u) ? 1
+                                                 : 0;
+            if (left != last_reboot_left) {
+                dash_ota_reboot(left);
+                last_reboot_left = left;
+            }
+            vTaskDelay(pdMS_TO_TICKS(50));
+            continue;
+        }
+        ota_reboot_at = 0;
+        last_reboot_left = 0xFF;
 
         if (ota_active || (ota_screen && ota_terminal && now_ticks < ota_hide_at)) {
             if (!ota_screen) {
