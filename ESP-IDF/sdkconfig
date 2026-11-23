@@ -693,8 +693,9 @@ CONFIG_BOOTLOADER_PROJECT_VER=1
 #
 # Application Rollback
 #
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 # default:
-# CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE is not set
+# CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK is not set
 # end of Application Rollback
 
 #
@@ -1685,6 +1686,33 @@ CONFIG_EFUSE_MAX_BLK_LEN=256
 # end of eFuse Bit Manager
 
 #
+# ESP-TLS
+#
+# default:
+CONFIG_ESP_TLS_USING_MBEDTLS=y
+# default:
+# CONFIG_ESP_TLS_CUSTOM_STACK is not set
+# default:
+# CONFIG_ESP_TLS_USE_SECURE_ELEMENT is not set
+# default:
+CONFIG_ESP_TLS_USE_DS_PERIPHERAL=y
+# default:
+# CONFIG_ESP_TLS_CLIENT_SESSION_TICKETS is not set
+# default:
+# CONFIG_ESP_TLS_SERVER_SESSION_TICKETS is not set
+# default:
+# CONFIG_ESP_TLS_SERVER_CERT_SELECT_HOOK is not set
+# default:
+# CONFIG_ESP_TLS_SERVER_MIN_AUTH_MODE_OPTIONAL is not set
+# default:
+# CONFIG_ESP_TLS_PSK_VERIFICATION is not set
+# default:
+# CONFIG_ESP_TLS_INSECURE is not set
+# default:
+CONFIG_ESP_TLS_DYN_BUF_STRATEGY_SUPPORTED=y
+# end of ESP-TLS
+
+#
 # Wireless Coexistence
 #
 # default:
@@ -1828,6 +1856,25 @@ CONFIG_ESP_GDBSTUB_SUPPORT_TASKS=y
 # default:
 CONFIG_ESP_GDBSTUB_MAX_TASKS=32
 # end of GDB Stub
+
+#
+# ESP HTTP client
+#
+# default:
+CONFIG_ESP_HTTP_CLIENT_ENABLE_HTTPS=y
+# default:
+# CONFIG_ESP_HTTP_CLIENT_ENABLE_BASIC_AUTH is not set
+# default:
+# CONFIG_ESP_HTTP_CLIENT_ENABLE_DIGEST_AUTH is not set
+# default:
+# CONFIG_ESP_HTTP_CLIENT_ENABLE_CUSTOM_TRANSPORT is not set
+# default:
+# CONFIG_ESP_HTTP_CLIENT_ENABLE_GET_CONTENT_RANGE is not set
+# default:
+CONFIG_ESP_HTTP_CLIENT_EVENT_POST_TIMEOUT=2000
+# default:
+# CONFIG_ESP_HTTP_CLIENT_SAVE_RESPONSE_HEADERS is not set
+# end of ESP HTTP client
 
 #
 # Hardware Settings
@@ -3443,7 +3490,7 @@ CONFIG_MBEDTLS_AES_HW_SMALL_DATA_LEN_OPTIM=y
 # default:
 # CONFIG_MBEDTLS_ATCA_HW_ECDSA_VERIFY is not set
 # default:
-# CONFIG_MBEDTLS_HARDWARE_RSA_DS_PERIPHERAL is not set
+CONFIG_MBEDTLS_HARDWARE_RSA_DS_PERIPHERAL=y
 # end of Hardware Acceleration
 
 #
@@ -3644,6 +3691,22 @@ CONFIG_SPI_FLASH_ENABLE_ENCRYPTED_READ_WRITE=y
 # end of SPI Flash driver
 
 #
+# TCP Transport
+#
+
+#
+# Websocket
+#
+# default:
+CONFIG_WS_TRANSPORT=y
+# default:
+CONFIG_WS_BUFFER_SIZE=1024
+# default:
+# CONFIG_WS_DYNAMIC_BUFFER is not set
+# end of Websocket
+# end of TCP Transport
+
+#
 # Virtual file system
 #
 # default:
@@ -3681,7 +3744,8 @@ CONFIG_VFS_INITIALIZE_DEV_NULL=y
 # Deprecated options for backward compatibility
 # CONFIG_APP_BUILD_TYPE_ELF_RAM is not set
 # CONFIG_NO_BLOBS is not set
-# CONFIG_APP_ROLLBACK_ENABLE is not set
+CONFIG_APP_ROLLBACK_ENABLE=y
+# CONFIG_APP_ANTI_ROLLBACK is not set
 # CONFIG_BOOTLOADER_COMPILER_OPTIMIZATION_NONE is not set
 # CONFIG_LOG_BOOTLOADER_LEVEL_NONE is not set
 # CONFIG_LOG_BOOTLOADER_LEVEL_ERROR is not set

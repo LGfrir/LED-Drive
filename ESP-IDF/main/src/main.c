@@ -24,6 +24,7 @@
 #include "task/auth_svc.h"
 #include "task/clock_scheduler.h"
 #include "task/gatt_svc.h"
+#include "task/ota_svc.h"
 
 #include "esp_log.h"
 #include "nvs_flash.h"
@@ -201,5 +202,10 @@ void app_main(void)
     time_sync_init(gatt_svc_time_request);
     auth_init();
 
+    ESP_ERROR_CHECK(ota_init());
+
     nimble_init_as_prph();
+
+    /* OTA image is only considered good after the app reached this point. */
+    ota_boot_confirm();
 }

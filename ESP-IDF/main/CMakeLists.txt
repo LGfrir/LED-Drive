@@ -17,6 +17,9 @@ idf_component_register(
         "src/driver/display/lcd.c"
         "src/driver/display/disp_dash.c"
         "src/driver/display/dash_data.c"
+        "src/driver/wifi/wifi_mgr.c"
+        "src/task/ota_svc.c"
+        "src/task/ota_ble_svc.c"
     INCLUDE_DIRS
         "inc"
     REQUIRES
@@ -27,6 +30,14 @@ idf_component_register(
         esp_driver_spi
         esp_lcd
         esp_timer
+        esp_wifi
+        esp_netif
+        esp_event
+        esp_http_client
+        app_update
+        bootloader_support
+        mbedtls
+        esp_app_format
         freertos
 )
 

@@ -288,6 +288,32 @@ static const ble_uuid128_t AUTH_CHR_LST_UUID  = AUTH_CHR_LST_UUID_REG;
 static const ble_uuid128_t AUTH_CHR_DEL_UUID  = AUTH_CHR_DEL_UUID_REG;
 static const ble_uuid128_t AUTH_CHR_NAME_UUID = AUTH_CHR_NAME_UUID_REG;
 
+/* ---------------- OTA 服务 ---------------- */
+
+#define OTA_SVC_UUID_REG BLE_UUID128_INIT \
+(0x6f,0x74,0x61,0x5f,0x73,0x76,0x63,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00)
+/* ASCII: ota_svc */
+
+#define OTA_CHR_CMD_UUID_REG BLE_UUID128_INIT \
+(0x6f,0x74,0x61,0x5f,0x63,0x6d,0x64,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00)
+/* ASCII: ota_cmd */
+
+#define OTA_CHR_STAT_UUID_REG BLE_UUID128_INIT \
+(0x6f,0x74,0x61,0x5f,0x73,0x74,0x61,0x74,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00)
+/* ASCII: ota_stat */
+
+#define OTA_CHR_INFO_UUID_REG BLE_UUID128_INIT \
+(0x6f,0x74,0x61,0x5f,0x69,0x6e,0x66,0x6f,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00)
+/* ASCII: ota_info */
+
+static const ble_uuid128_t OTA_SVC_UUID      = OTA_SVC_UUID_REG;
+static const ble_uuid128_t OTA_CHR_CMD_UUID  = OTA_CHR_CMD_UUID_REG;
+static const ble_uuid128_t OTA_CHR_STAT_UUID = OTA_CHR_STAT_UUID_REG;
+static const ble_uuid128_t OTA_CHR_INFO_UUID = OTA_CHR_INFO_UUID_REG;
+
+int ota_ble_svc_callback(uint16_t conn_handle, uint16_t attr_handle,
+                         struct ble_gatt_access_ctxt *ctxt, void *arg);
+
 /* NimBLE 注册时把通知用的 value handle 交给 gatt_svc */
 void gatt_svc_set_handles(uint16_t time_req, uint16_t preset_data, uint16_t result);
 
@@ -592,6 +618,31 @@ static const struct ble_gatt_svc_def gatt_svr_svcs[] = {
                 .access_cb = auth_svc_callback,
                 .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_WRITE,
                 .arg = (void *)(intptr_t)7
+            },
+            { 0 }
+        }
+    },
+    {
+        .type = BLE_GATT_SVC_TYPE_PRIMARY,
+        .uuid = &OTA_SVC_UUID.u,
+        .characteristics = (struct ble_gatt_chr_def[]) {
+            {
+                .uuid = &OTA_CHR_CMD_UUID.u,
+                .access_cb = ota_ble_svc_callback,
+                .flags = BLE_GATT_CHR_F_WRITE,
+                .arg = (void *)(intptr_t)1
+            },
+            {
+                .uuid = &OTA_CHR_STAT_UUID.u,
+                .access_cb = ota_ble_svc_callback,
+                .flags = BLE_GATT_CHR_F_READ,
+                .arg = (void *)(intptr_t)2
+            },
+            {
+                .uuid = &OTA_CHR_INFO_UUID.u,
+                .access_cb = ota_ble_svc_callback,
+                .flags = BLE_GATT_CHR_F_READ,
+                .arg = (void *)(intptr_t)3
             },
             { 0 }
         }

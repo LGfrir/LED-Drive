@@ -1,6 +1,9 @@
 # Name,   Type, SubType, Offset,   Size,     Flags
-# 2 MB flash：nvs 扩到 64 KB，给 32 条预设留余量
-# app 分区必须按 64 KB 对齐，所以从 0x20000 开始
+# 16 MB flash: 64 KB NVS + otadata + 2 MB factory + two 2 MB OTA slots
+# NVS stays at 0x9000 so existing presets/schedules survive the migration.
 nvs,      data, nvs,     0x9000,   0x10000,
-phy_init, data, phy,     0x19000,  0x1000,
-factory,  app,  factory, 0x20000,  0x100000,
+otadata,  data, ota,     0x19000,  0x2000,
+phy_init, data, phy,     0x1B000,  0x1000,
+factory,  app,  factory, 0x20000,  0x200000,
+ota_0,    app,  ota_0,   0x220000, 0x200000,
+ota_1,    app,  ota_1,   0x420000, 0x200000,

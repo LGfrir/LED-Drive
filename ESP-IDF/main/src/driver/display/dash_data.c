@@ -14,6 +14,7 @@
 #include "driver/led_strip/light_mode_driver.h"
 #include "driver/preset/light_preset.h"
 #include "task/clock_scheduler.h"
+#include "task/ota_svc.h"
 
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -53,6 +54,8 @@ static void dash_task(void *arg)
 
     bool first = true;
     bool last_connected = false;
+    ota_state_t last_ota_state = OTA_IDLE;
+    uint8_t last_ota_pct = 0;
 
     while (1) {
         dash_status_t st;
@@ -143,6 +146,46 @@ static void dash_task(void *arg)
             dash_flash_activity();
             last_connected = connected;
             ESP_LOGI(TAG, "BLE %s", connected ? "connected" : "disconnected");
+        }
+
+        ota_status_t ota;
+        ota_get_status(&ota);
+        bool ota_changed = (ota.state != last_ota_state) ||
+                           (ota.state == OTA_DOWNLOADING && (ota.progress / 10) != (last_ota_pct / 10));
+        if (ota_changed) {
+            char msg[26];
+            switch (ota.state) {
+            case OTA_CONNECTING_WIFI:
+                snprintf(msg, sizeof(msg), "OTA WIFI...");
+                break;
+            case OTA_DOWNLOADING:
+                snprintf(msg, sizeof(msg), "OTA %u%%", (unsigned)ota.progress);
+                break;
+            case OTA_VERIFYING:
+                snprintf(msg, sizeof(msg), "OTA VERIFY");
+                break;
+            case OTA_READY_REBOOT:
+                snprintf(msg, sizeof(msg), "OTA REBOOT");
+                break;
+            case OTA_FAILED:
+                snprintf(msg, sizeof(msg), "OTA FAIL");
+                break;
+            case OTA_ABORTED:
+                snprintf(msg, sizeof(msg), "OTA ABORT");
+                break;
+            case OTA_SUCCESS:
+                snprintf(msg, sizeof(msg), "OTA OK");
+                break;
+            default:
+                msg[0] = '\0';
+                break;
+            }
+            if (msg[0] != '\0') {
+                dash_log_push(msg);
+                dash_flash_activity();
+            }
+            last_ota_state = ota.state;
+            last_ota_pct = ota.progress;
         }
 
         vTaskDelay(pdMS_TO_TICKS(1000));
