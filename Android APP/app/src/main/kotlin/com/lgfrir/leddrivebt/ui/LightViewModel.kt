@@ -107,7 +107,10 @@ class LightViewModel(app: Application) : AndroidViewModel(app) {
      * OTA 页面状态。link 在 init 里装成 [OtaBleLink]，复用现有 BLE 连接。
      * 手机 WiFi IPv4 的读取器在这里注入，controller 本身不持有 Context。
      */
-    val ota = OtaController { phoneWifiIpv4(app) }
+    val ota = OtaController(
+        wifiIpv4 = { phoneWifiIpv4(app) },
+        hotspotIpv4 = { phoneHotspotIpv4() },
+    )
     val ioModes = ble.ioModes
     val clockStat = ble.clockStat
     val synced = ble.synced

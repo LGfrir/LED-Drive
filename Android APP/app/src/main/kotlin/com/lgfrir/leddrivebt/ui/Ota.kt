@@ -31,6 +31,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -74,7 +75,13 @@ import kotlin.math.roundToInt
  */
 enum class OtaSource(val label: String, val blurb: String) {
     Server("远程服务器", "设备按 HTTPS 地址下载固件"),
-    Hotspot("手机本地服务", "手机提供固件，需和灯带连同一 WiFi"),
+    Hotspot("手机本地服务", "手机热点或同一 WiFi 提供固件"),
+}
+
+/** 本地升级的网络方式：手机自己开热点，或手机和灯带连同一个 WiFi。 */
+enum class OtaLocalMode(val label: String) {
+    Hotspot("手机热点（手动开启）"),
+    SameWifi("同一 WiFi"),
 }
 
 /** 页面上的升级阶段。 */
@@ -95,17 +102,19 @@ enum class OtaPhase(val label: String) {
 data class OtaUiState(
     val phase: OtaPhase = OtaPhase.Idle,
     val source: OtaSource = OtaSource.Server,
+    /** 本地模式：手机热点（手动开启）或同一 WiFi。 */
+    val localMode: OtaLocalMode = OtaLocalMode.Hotspot,
     /** 远程模式：固件服务器地址，必须以 https:// 开头。 */
     val serverUrl: String = "",
-    /** 远程模式：设备要连接的 WiFi 名称，不能为空。本地模式也要填手机当前连的 WiFi。 */
+    /** 设备要连接的 WiFi/热点名称；远程和本地模式都必填。 */
     val wifiSsid: String = "",
-    /** 远程模式：WiFi 密码，开放网络可以留空。本地模式同样会发给设备。 */
+    /** WiFi/热点密码；开放网络可以留空。 */
     val wifiPassword: String = "",
     /** 本地模式：手机端固件服务的端口。 */
     val localPort: Int = OtaLocalServer.DEFAULT_PORT,
     /** 本地模式：已经复制到手机缓存的固件。只放文件和摘要，不放文件字节。 */
     val localFile: OtaLocalFirmware? = null,
-    /** 本地模式：最近一次读到的手机 WiFi IPv4。null = 没连 WiFi 或读不到。 */
+    /** 本地模式：最近一次读到的手机热点/WiFi IPv4。null = 读不到。 */
     val localIp: String? = null,
     /** 本地模式：本机 HTTP 服务是否在运行（只在升级期间为 true）。 */
     val localServiceRunning: Boolean = false,
@@ -124,6 +133,7 @@ data class OtaUiState(
 /** 真正交给设备端的请求。字段顺序和固件 START 命令一致。 */
 data class OtaRequest(
     val source: OtaSource,
+    val localMode: OtaLocalMode = OtaLocalMode.Hotspot,
     val serverUrl: String = "",
     val wifiSsid: String = "",
     val wifiPassword: String = "",
@@ -146,6 +156,7 @@ interface OtaLink {
 /** OtaScreen 对外只依赖这一组回调，接 BLE 时换 controller 的 link，不用动界面。 */
 data class OtaActions(
     val onSource: (OtaSource) -> Unit,
+    val onLocalMode: (OtaLocalMode) -> Unit,
     val onServerUrl: (String) -> Unit,
     val onWifiSsid: (String) -> Unit,
     val onWifiPassword: (String) -> Unit,
@@ -175,6 +186,7 @@ data class OtaActions(
  */
 class OtaController(
     private val wifiIpv4: (() -> String?)? = null,
+    private val hotspotIpv4: (() -> String?)? = null,
 ) {
     var state by mutableStateOf(OtaUiState())
         private set
@@ -186,6 +198,7 @@ class OtaController(
 
     val actions: OtaActions = OtaActions(
         onSource = { selectSource(it) },
+        onLocalMode = { selectLocalMode(it) },
         onServerUrl = { setServerUrl(it) },
         onWifiSsid = { setWifiSsid(it) },
         onWifiPassword = { setWifiPassword(it) },
@@ -206,6 +219,12 @@ class OtaController(
         if (source == OtaSource.Hotspot) refreshLocalNetwork(quiet = true)
     }
 
+    fun selectLocalMode(mode: OtaLocalMode) {
+        if (state.phase.busy || state.localMode == mode) return
+        state = state.copy(localMode = mode, message = "")
+        refreshLocalNetwork(quiet = true)
+    }
+
     fun setServerUrl(url: String) {
         state = state.copy(serverUrl = url, message = "")
     }
@@ -221,18 +240,28 @@ class OtaController(
     /** 手机 WiFi IPv4 的当前值，取自注入的读取器；OtaBleLink 也用它拼 URL。 */
     fun currentWifiIpv4(): String? = wifiIpv4?.invoke()
 
+    /** 当前本地模式对应的 IPv4：热点模式读 AP 网卡，同一 WiFi 模式读 WiFi 网卡。 */
+    fun currentLocalIp(mode: OtaLocalMode = state.localMode): String? = when (mode) {
+        OtaLocalMode.Hotspot -> hotspotIpv4?.invoke()
+        OtaLocalMode.SameWifi -> wifiIpv4?.invoke()
+    }
+
     /**
-     * 重新读一次手机 WiFi IPv4。[quiet] = true 时只更新地址不写提示，
+     * 重新读一次手机热点/WiFi IPv4。[quiet] = true 时只更新地址不写提示，
      * 用于用户切到本地模式时静默刷新。
      */
     fun refreshLocalNetwork(quiet: Boolean = false) {
         if (state.phase.busy) return
-        val ip = currentWifiIpv4()
+        val ip = currentLocalIp()
         state = state.copy(
             localIp = ip,
             message = when {
                 quiet -> state.message
-                ip == null -> "没有读到手机 WiFi 的 IPv4 地址。请先让手机连接 WiFi，再试本地升级。"
+                ip == null && state.localMode == OtaLocalMode.Hotspot ->
+                    "没有检测到手机热点 IP。请先在系统设置里打开热点（2.4GHz），再点“刷新热点 IP”。"
+                ip == null ->
+                    "没有读到手机 WiFi 的 IPv4 地址。请先让手机连接 WiFi，再试本地升级。"
+                state.localMode == OtaLocalMode.Hotspot -> "手机热点地址：$ip"
                 else -> "手机当前 WiFi 地址：$ip"
             },
         )
@@ -249,7 +278,7 @@ class OtaController(
         if (state.phase.busy) return
         state = state.copy(
             localFile = firmware,
-            localIp = currentWifiIpv4() ?: state.localIp,
+            localIp = currentLocalIp() ?: state.localIp,
             message = "已选择 ${firmware.name}（${formatByteCount(firmware.size)}），" +
                 "SHA-256 ${firmware.sha256.take(16)}…",
         )
@@ -451,7 +480,7 @@ class OtaController(
             }
 
             OtaSource.Hotspot -> {
-                ip = currentWifiIpv4()
+                ip = currentLocalIp(current.localMode)
                 val firmware = current.localFile
                 val file = firmware?.file
                 when {
@@ -459,8 +488,12 @@ class OtaController(
                         "请先选择固件文件；没有固件文件时本地服务不会启动，也不会向设备发送命令。"
                     !file.isFile || file.length() <= 0L ->
                         "本地固件缓存已经不在了，请重新选择固件文件。"
+                    ip == null && current.localMode == OtaLocalMode.Hotspot ->
+                        "没有检测到手机热点 IP。请先在系统设置打开热点（2.4GHz），点刷新后再开始。"
                     ip == null ->
                         "没有读到手机 WiFi 的 IPv4 地址。请先让手机连接 WiFi，再开始本地升级。"
+                    current.wifiSsid.trim().isEmpty() && current.localMode == OtaLocalMode.Hotspot ->
+                        "请填写手机热点名称（SSID）和密码。"
                     current.wifiSsid.trim().isEmpty() ->
                         "请填写灯带要连接的 WiFi 名称；它必须和手机在同一个 WiFi。"
                     else -> null
@@ -476,6 +509,7 @@ class OtaController(
         }
         return OtaRequest(
             source = current.source,
+            localMode = current.localMode,
             serverUrl = current.serverUrl.trim(),
             wifiSsid = current.wifiSsid.trim(),
             wifiPassword = current.wifiPassword,
@@ -754,6 +788,7 @@ private fun OtaField(
 ) {
     val palette = LocalPalette.current
     val shape = RoundedCornerShape(Radius.small)
+    var passwordVisible by rememberSaveable { mutableStateOf(false) }
     BasicTextField(
         value = value,
         onValueChange = onValueChange,
@@ -762,25 +797,40 @@ private fun OtaField(
         textStyle = AppType.body.copy(color = palette.text),
         cursorBrush = SolidColor(palette.accent),
         keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
-        visualTransformation = if (password) {
+        visualTransformation = if (password && !passwordVisible) {
             PasswordVisualTransformation()
         } else {
             VisualTransformation.None
         },
         modifier = Modifier.fillMaxWidth().padding(top = Space.x2).enabledDim(enabled),
         decorationBox = { inner ->
-            Box(
+            Row(
                 Modifier
                     .fillMaxWidth()
                     .clip(shape)
                     .background(palette.surfaceHigh.copy(alpha = 0.72f))
                     .border(1.dp, palette.hairline, shape)
-                    .padding(horizontal = Space.x3, vertical = Space.x3),
+                    .padding(start = Space.x3, end = Space.x1, top = Space.x1, bottom = Space.x1),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (value.isEmpty()) {
-                    Text(placeholder, color = palette.muted, style = AppType.body)
+                Box(Modifier.weight(1f)) {
+                    if (value.isEmpty()) {
+                        Text(placeholder, color = palette.muted, style = AppType.body)
+                    }
+                    inner()
                 }
-                inner()
+                if (password) {
+                    TextButton(
+                        onClick = { passwordVisible = !passwordVisible },
+                        enabled = enabled,
+                    ) {
+                        Text(
+                            if (passwordVisible) "隐藏" else "显示",
+                            color = palette.accent,
+                            style = AppType.caption,
+                        )
+                    }
+                }
             }
         },
     )
@@ -796,19 +846,49 @@ private fun OtaHotspotBlock(
 ) {
     val palette = LocalPalette.current
     val enabled = !state.phase.busy && !importing
+    val hotspot = state.localMode == OtaLocalMode.Hotspot
     val predictedUrl = state.localIp?.let {
         "http://$it:${state.localPort}/${OtaLocalServer.FIRMWARE_PATH}"
     }
     AcrylicGroup {
         Text("手机本地固件服务", color = palette.text, style = AppType.strong)
+
+        Row(
+            Modifier.fillMaxWidth().padding(top = Space.x2),
+            horizontalArrangement = Arrangement.spacedBy(Space.x2),
+        ) {
+            OtaLocalMode.entries.forEach { mode ->
+                val selected = state.localMode == mode
+                val onClick = { actions.onLocalMode(mode) }
+                if (selected) {
+                    Button(
+                        onClick = onClick,
+                        enabled = enabled,
+                        modifier = Modifier.weight(1f).heightIn(min = MinTouchTarget),
+                    ) { Text(mode.label) }
+                } else {
+                    OutlinedButton(
+                        onClick = onClick,
+                        enabled = enabled,
+                        modifier = Modifier.weight(1f).heightIn(min = MinTouchTarget),
+                    ) { Text(mode.label) }
+                }
+            }
+        }
+
         Text(
-            "手机先启动一个本机 HTTP 服务，再把地址和 token 通过 BLE 发给灯带。" +
-                "灯带必须和手机连在同一个 WiFi；手机热点（LocalOnlyHotspot）模式下一步实现。",
+            if (hotspot) {
+                "请先在系统设置里打开手机热点，频段选 2.4GHz（ESP32 不支持 5GHz）。" +
+                    "APP 会检测热点 IP、启动本机 HTTP 服务，并把热点名称/密码通过 BLE 发给灯带。"
+            } else {
+                "手机先启动一个本机 HTTP 服务，再把地址和 token 通过 BLE 发给灯带。" +
+                    "灯带必须和手机连在同一个 WiFi。"
+            },
             color = palette.muted,
             style = AppType.body,
             modifier = Modifier.padding(top = Space.x1),
         )
-        OtaFact("手机 WiFi IP", state.localIp ?: "未连接 WiFi")
+        OtaFact(if (hotspot) "手机热点 IP" else "手机 WiFi IP", state.localIp ?: "未检测到")
         OtaFact("监听端口", "${state.localPort}")
         OtaFact(
             "服务状态",
@@ -818,11 +898,20 @@ private fun OtaHotspotBlock(
                 else -> "未启动（开始升级时启动）"
             },
         )
-        OtaFact("固件地址", state.localServiceUrl ?: predictedUrl ?: "连接 WiFi 后生成")
+        OtaFact("固件地址", state.localServiceUrl ?: predictedUrl ?: "检测到 IP 后生成")
         OtaFact("固件文件", state.localFile?.name ?: "未选择")
         state.localFile?.let { firmware ->
             OtaFact("文件大小", formatByteCount(firmware.size))
             OtaFact("SHA-256", "${firmware.sha256.take(16)}…${firmware.sha256.takeLast(8)}")
+        }
+        if (hotspot && state.localIp == null) {
+            Text(
+                "没有检测到热点 IP：请确认系统热点已开启、频段为 2.4GHz，然后点“刷新热点 IP”。" +
+                    "部分手机需要先断开 WiFi 再开热点。",
+                color = palette.warn,
+                style = AppType.caption,
+                modifier = Modifier.padding(top = Space.x2),
+            )
         }
 
         Row(
@@ -833,7 +922,7 @@ private fun OtaHotspotBlock(
                 onClick = onRefreshNetwork,
                 enabled = enabled,
                 modifier = Modifier.weight(1f).heightIn(min = MinTouchTarget),
-            ) { Text("刷新手机 IP") }
+            ) { Text(if (hotspot) "刷新热点 IP" else "刷新手机 IP") }
             OutlinedButton(
                 onClick = onPickFile,
                 enabled = enabled,
@@ -859,30 +948,36 @@ private fun OtaHotspotBlock(
         }
 
         Text(
-            "灯带要连接的 WiFi",
+            if (hotspot) "灯带要连接的热点" else "灯带要连接的 WiFi",
             color = palette.text,
             style = AppType.strong,
             modifier = Modifier.padding(top = Space.x3),
         )
         OtaField(
             value = state.wifiSsid,
-            placeholder = "WiFi 名称（SSID，和手机同一个）",
+            placeholder = if (hotspot) "热点名称（SSID）" else "WiFi 名称（SSID，和手机同一个）",
             keyboardType = KeyboardType.Text,
             enabled = !state.phase.busy,
             onValueChange = actions.onWifiSsid,
         )
         OtaField(
             value = state.wifiPassword,
-            placeholder = "WiFi 密码（开放网络留空）",
+            placeholder = if (hotspot) "热点密码" else "WiFi 密码（开放网络留空）",
             keyboardType = KeyboardType.Password,
             password = true,
             enabled = !state.phase.busy,
             onValueChange = actions.onWifiPassword,
         )
         Text(
-            "手机和灯带必须在同一个 WiFi；这里填的是那个 WiFi 的名称和密码，会随 START 命令发给设备。" +
-                "升级结束、失败或取消后，手机上的本地服务会自动关闭。升级期间请让 App 留在前台。" +
-                "如果路由器开启了 AP 隔离（客户端隔离），灯带会连不到手机；端口 8080 被别的 App 占用时，本地服务会启动失败并给出提示。",
+            if (hotspot) {
+                "这里填的是手机热点的名称和密码，会随 START 命令发给设备；设备会断开原来的 WiFi 去连这个热点。" +
+                    "热点必须是 2.4GHz。升级结束、失败或取消后，手机上的本地服务会自动关闭。升级期间请让 App 留在前台。" +
+                    "如果手机热点开了客户端隔离，灯带会连不到手机；端口 12894 被占用时本地服务会启动失败并给出提示。"
+            } else {
+                "手机和灯带必须在同一个 WiFi；这里填的是那个 WiFi 的名称和密码，会随 START 命令发给设备。" +
+                    "升级结束、失败或取消后，手机上的本地服务会自动关闭。升级期间请让 App 留在前台。" +
+                    "如果路由器开启了 AP 隔离（客户端隔离），灯带会连不到手机；端口 12894 被别的 App 占用时，本地服务会启动失败并给出提示。"
+            },
             color = palette.muted,
             style = AppType.caption,
             modifier = Modifier.padding(top = Space.x2),

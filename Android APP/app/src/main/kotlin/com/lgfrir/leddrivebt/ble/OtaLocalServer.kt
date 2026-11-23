@@ -298,7 +298,7 @@ class OtaLocalServer(private val host: String) {
 
     companion object {
         const val FIRMWARE_PATH = "firmware.bin"
-        const val DEFAULT_PORT = 8080
+        const val DEFAULT_PORT = 12894
 
         private const val TOKEN_HEADER = "x-ota-token"
         private const val BACKLOG = 8

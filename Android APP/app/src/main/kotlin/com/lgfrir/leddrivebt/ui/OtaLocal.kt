@@ -10,6 +10,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.net.Inet4Address
+import java.net.NetworkInterface
 import java.security.MessageDigest
 import java.util.Locale
 
@@ -147,6 +148,59 @@ fun phoneWifiIpv4(context: Context): String? {
                 }
                 ?.hostAddress
         }
+    } catch (_: SecurityException) {
+        null
+    } catch (_: Exception) {
+        null
+    }
+}
+
+/**
+ * 手机热点（AP）的 IPv4 地址。
+ *
+ * 手机开热点时不是 WiFi 客户端，[phoneWifiIpv4] 读不到地址；这里枚举网卡，
+ * 优先 ap0 / wlan1 / swlan0 / softap，排除 rmnet/ccmni 等蜂窝接口。
+ * 读不到返回 null，由界面提示用户确认热点已开启并点刷新。
+ */
+fun phoneHotspotIpv4(): String? {
+    return try {
+        val all = NetworkInterface.getNetworkInterfaces() ?: return null
+        val list = mutableListOf<NetworkInterface>()
+        while (all.hasMoreElements()) {
+            list += all.nextElement()
+        }
+        fun rank(name: String): Int = when {
+            name.startsWith("ap") -> 0
+            name.startsWith("swlan") -> 0
+            name.startsWith("softap") -> 0
+            name.startsWith("wlan1") -> 1
+            name.startsWith("wlan") -> 2
+            name.startsWith("p2p") -> 3
+            name.startsWith("rmnet") || name.startsWith("ccmni") ||
+                name.startsWith("pdp") || name.startsWith("clat") -> 9
+            else -> 5
+        }
+
+        list.asSequence()
+            .filter { it.isUp && !it.isLoopback }
+            .sortedBy { rank(it.name.lowercase(Locale.US)) }
+            .mapNotNull { iface ->
+                val addresses = iface.inetAddresses
+                var found: String? = null
+                while (addresses.hasMoreElements()) {
+                    val address = addresses.nextElement()
+                    if (address is Inet4Address &&
+                        !address.isLoopbackAddress &&
+                        !address.isLinkLocalAddress &&
+                        address.isSiteLocalAddress
+                    ) {
+                        found = address.hostAddress
+                        break
+                    }
+                }
+                found
+            }
+            .firstOrNull()
     } catch (_: SecurityException) {
         null
     } catch (_: Exception) {

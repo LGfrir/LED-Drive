@@ -114,8 +114,14 @@ class OtaBleLink(
         if (!firmware.file.isFile || firmware.file.length() <= 0L) {
             throw OtaLinkException("本地固件缓存已经不在了，请重新选择固件文件。")
         }
-        val ip = ota.currentWifiIpv4()
-            ?: throw OtaLinkException("没有读到手机 WiFi 的 IPv4 地址。请先让手机连接 WiFi。")
+        val ip = ota.currentLocalIp(request.localMode)
+            ?: throw OtaLinkException(
+                if (request.localMode == OtaLocalMode.Hotspot) {
+                    "没有检测到手机热点 IP。请先在系统设置打开热点（2.4GHz），再点“刷新热点 IP”。"
+                } else {
+                    "没有读到手机 WiFi 的 IPv4 地址。请先让手机连接 WiFi。"
+                },
+            )
         val ssid = request.wifiSsid.trim()
         validateCommon(ssid, request.wifiPassword)
         val url = localUrl(ip, request.localPort)
@@ -124,7 +130,7 @@ class OtaBleLink(
         if (total > OTA_CMD_MAX) {
             throw OtaLinkException(
                 "本地 START 参数共 $total 字节，超过 BLE 单包上限 $OTA_CMD_MAX 字节。" +
-                    "请缩短 WiFi 名称/密码后重试。",
+                    "请缩短 WiFi/热点名称或密码后重试。",
             )
         }
         val info = readInfo()
@@ -144,7 +150,11 @@ class OtaBleLink(
                 append("，SHA-256 ")
                 append(firmware.sha256.take(16))
                 append("…）。START 参数 $total/$OTA_CMD_MAX 字节。")
-                append("开始前请确认手机和灯带连接同一个 WiFi。")
+                if (request.localMode == OtaLocalMode.Hotspot) {
+                    append("设备将连接手机热点；请确认热点为 2.4GHz。")
+                } else {
+                    append("开始前请确认手机和灯带连接同一个 WiFi。")
+                }
                 status.busyText()?.let { append(it) }
             },
         )
@@ -168,9 +178,13 @@ class OtaBleLink(
                         if (!firmware.file.isFile || firmware.file.length() <= 0L) {
                             throw OtaLinkException("本地固件缓存已经不在了，请重新选择固件文件。")
                         }
-                        val ip = ota.currentWifiIpv4()
+                        val ip = ota.currentLocalIp(request.localMode)
                             ?: throw OtaLinkException(
-                                "没有读到手机 WiFi 的 IPv4 地址。请先让手机连接 WiFi，再开始本地升级。",
+                                if (request.localMode == OtaLocalMode.Hotspot) {
+                                    "没有检测到手机热点 IP。请先在系统设置打开热点（2.4GHz），再点“刷新热点 IP”。"
+                                } else {
+                                    "没有读到手机 WiFi 的 IPv4 地址。请先让手机连接 WiFi，再开始本地升级。"
+                                },
                             )
                         val ssid = request.wifiSsid.trim()
                         val password = request.wifiPassword
@@ -204,7 +218,8 @@ class OtaBleLink(
                         ota.beginConnectingWifi()
                         ota.note(
                             "本地服务 $url 已启动（${formatByteCount(firmware.size)}）。" +
-                                "START 已发送（${payload.size} 字节），设备正在连接 WiFi…",
+                                "START 已发送（${payload.size} 字节），设备正在连接" +
+                                if (request.localMode == OtaLocalMode.Hotspot) "手机热点…" else " WiFi…",
                         )
                     }
                 }
