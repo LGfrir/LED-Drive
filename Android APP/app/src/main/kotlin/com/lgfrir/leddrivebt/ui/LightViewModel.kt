@@ -103,6 +103,19 @@ class LightViewModel(app: Application) : AndroidViewModel(app) {
     val clockReady = ble.clockReady
     val clockNote = ble.clockNote
     val devInfo = ble.devInfo
+    val deviceName = ble.deviceName
+
+    /** 修改设备 BLE 广播名；回调在主线程，给设置页显示结果。 */
+    fun renameDevice(name: String, onDone: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val saved = ble.writeDeviceName(name)
+                onDone(true, "蓝牙名称已改为「$saved」；下次广播/重连生效。")
+            } catch (error: Exception) {
+                onDone(false, error.message ?: "修改蓝牙名称失败。")
+            }
+        }
+    }
     /**
      * OTA 页面状态。link 在 init 里装成 [OtaBleLink]，复用现有 BLE 连接。
      * 手机 WiFi IPv4 的读取器在这里注入，controller 本身不持有 Context。

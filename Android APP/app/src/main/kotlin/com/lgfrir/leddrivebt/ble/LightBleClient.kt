@@ -168,6 +168,7 @@ class LightBleClient(context: Context) {
     private val _epochMark = MutableStateFlow(0L)
     private val _address = MutableStateFlow("")
     private val _peerName = MutableStateFlow("")
+    private val _deviceName = MutableStateFlow<String?>(null)
     private val _phase = MutableStateFlow(LinkPhase.Idle)
     private val _connectLog = MutableStateFlow<List<BleLogLine>>(emptyList())
 
@@ -196,6 +197,7 @@ class LightBleClient(context: Context) {
     val epochMark: StateFlow<Long> = _epochMark
     val address: StateFlow<String> = _address
     val peerName: StateFlow<String> = _peerName
+    val deviceName: StateFlow<String?> = _deviceName
     val phase: StateFlow<LinkPhase> = _phase
     val connectStep: StateFlow<ConnectStep?> = _connectStep
     val dropReason: StateFlow<String> = _dropReason
@@ -317,6 +319,40 @@ class LightBleClient(context: Context) {
         if (stat.isEmpty() || stat[0].toInt() != 1) {
             throw BleException("设备鉴权失败：PIN 123456 不正确或未授权")
         }
+
+        /* 读当前广播名，失败不影响连接；设置页会显示“未读取”。 */
+        try {
+            _deviceName.value = read(GattId.AUTH_SVC, GattId.AUTH_NAME)
+                .toString(Charsets.US_ASCII)
+                .trim('\u0000')
+                .ifBlank { null }
+        } catch (_: Exception) {
+            _deviceName.value = null
+        }
+    }
+
+    /** 读设备当前 BLE 广播名（需要已鉴权）。 */
+    suspend fun readDeviceName(): String = gate.withLock {
+        val name = read(GattId.AUTH_SVC, GattId.AUTH_NAME)
+            .toString(Charsets.US_ASCII)
+            .trim('\u0000')
+        _deviceName.value = name.ifBlank { null }
+        name
+    }
+
+    /** 修改设备 BLE 广播名；设备会写 NVS，下次广播/重连生效。 */
+    suspend fun writeDeviceName(name: String): String = gate.withLock {
+        val trimmed = name.trim()
+        val bytes = trimmed.toByteArray(Charsets.US_ASCII)
+        if (bytes.isEmpty() || bytes.size > 31) {
+            throw BleException("蓝牙名称需要 1-31 个 ASCII 字符")
+        }
+        if (bytes.any { it < 0x20 || it > 0x7E }) {
+            throw BleException("蓝牙名称只能包含可打印 ASCII 字符")
+        }
+        write(GattId.AUTH_SVC, GattId.AUTH_NAME, bytes)
+        _deviceName.value = trimmed
+        trimmed
     }
 
     /** 本机在设备上的稳定身份 UUID，首次连接生成并持久化。 */
@@ -442,6 +478,7 @@ class LightBleClient(context: Context) {
         _phase.value = LinkPhase.Dropped
         _connectStep.value = null
         _connected.value = false
+        _deviceName.value = null
         _ios.value = emptyList()
         closeGatt()
         _address.value = ""

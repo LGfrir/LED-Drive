@@ -107,6 +107,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.layout.ContentScale
@@ -199,6 +200,7 @@ private enum class Desk(val depth: Int) {
     SlotEdit(2),
     Backup(1),
     Ota(2),
+    DeviceName(2),
 }
 
 @Composable
@@ -400,7 +402,7 @@ fun LightApp(model: LightViewModel) {
                     }
                     LaunchedEffect(ui.phase) {
                         val devicePage = desk != Desk.Work && desk != Desk.Settings && desk != Desk.Appearance &&
-                            desk != Desk.Log && desk != Desk.Ota
+                            desk != Desk.Log && desk != Desk.Ota && desk != Desk.DeviceName
                         if (ui.phase == LinkPhase.Dropped || (ui.phase == LinkPhase.Idle && devicePage)) {
                             desk = Desk.Work
                             boardPreview = false
@@ -425,6 +427,7 @@ fun LightApp(model: LightViewModel) {
                             desk == Desk.Log -> desk = Desk.Settings
                             desk == Desk.Appearance -> desk = Desk.Settings
                             desk == Desk.Ota -> desk = Desk.Settings
+                            desk == Desk.DeviceName -> desk = Desk.Settings
                             desk == Desk.Settings -> desk = Desk.Work
                             desk == Desk.SlotEdit -> desk = Desk.Work
                             else -> desk = Desk.Work
@@ -468,6 +471,7 @@ fun LightApp(model: LightViewModel) {
                                             desk = Desk.Monitor
                                         }
                                     }
+                                    MenuRow("蓝牙名称", enabled = ui.connected) { desk = Desk.DeviceName }
                                     MenuRow("外观") { desk = Desk.Appearance }
                                     MenuRow("日志") { desk = Desk.Log }
                                     MenuRow("备份") { desk = Desk.Backup }
@@ -663,6 +667,75 @@ fun LightApp(model: LightViewModel) {
                                 val context = LocalContext.current
                                 BackupActions(ui.message, { model.exportBackup(context) }, model::importBackup)
                             }
+                            Desk.DeviceName -> AppChrome(
+                                "蓝牙名称",
+                                onBack = { desk = Desk.Settings },
+                            ) {
+                                val currentName by model.deviceName.collectAsStateWithLifecycle()
+                                var draft by remember(currentName) {
+                                    mutableStateOf(currentName.orEmpty())
+                                }
+                                var busy by remember { mutableStateOf(false) }
+                                var note by remember { mutableStateOf("") }
+                                val palette = LocalPalette.current
+                                AcrylicGroup {
+                                    Text(
+                                        "当前广播名称：${currentName ?: "未读取"}",
+                                        color = palette.text,
+                                        style = AppType.strong,
+                                    )
+                                    OtaField(
+                                        value = draft,
+                                        placeholder = "蓝牙名称（1-31 个 ASCII 字符）",
+                                        keyboardType = KeyboardType.Text,
+                                        enabled = !busy,
+                                        onValueChange = { if (it.length <= 31) draft = it },
+                                    )
+                                    Text(
+                                        "只能使用可打印 ASCII 字符，例如 LEDDrive-Desk。保存后设备会写入 NVS，" +
+                                            "下次广播/重连生效；当前连接不会断开。",
+                                        color = palette.muted,
+                                        style = AppType.caption,
+                                        modifier = Modifier.padding(top = Space.x2),
+                                    )
+                                    Row(
+                                        Modifier.fillMaxWidth().padding(top = Space.x2),
+                                        horizontalArrangement = Arrangement.spacedBy(Space.x2),
+                                    ) {
+                                        Button(
+                                            onClick = {
+                                                if (draft.isBlank()) {
+                                                    note = "蓝牙名称不能为空。"
+                                                } else {
+                                                    busy = true
+                                                    note = ""
+                                                    model.renameDevice(draft) { ok, message ->
+                                                        busy = false
+                                                        note = message
+                                                        if (ok) note += " 重新连接设备后扫描名会更新。"
+                                                    }
+                                                }
+                                            },
+                                            enabled = !busy,
+                                            modifier = Modifier.heightIn(min = MinTouchTarget),
+                                        ) { Text(if (busy) "保存中…" else "保存") }
+                                        OutlinedButton(
+                                            onClick = { draft = currentName.orEmpty() },
+                                            enabled = !busy,
+                                            modifier = Modifier.heightIn(min = MinTouchTarget),
+                                        ) { Text("还原") }
+                                    }
+                                    if (note.isNotBlank()) {
+                                        Text(
+                                            note,
+                                            color = palette.accent,
+                                            style = AppType.caption,
+                                            modifier = Modifier.padding(top = Space.x2),
+                                        )
+                                    }
+                                }
+                            }
+
                             Desk.Ota -> AppChrome("固件升级", onBack = { desk = Desk.Settings }) {
                                 val devInfo by model.devInfo.collectAsStateWithLifecycle()
                                 LaunchedEffect(devInfo?.fw) {

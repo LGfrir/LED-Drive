@@ -86,6 +86,7 @@ object GattId {
     val AUTH_ID = firmwareUuid("auth_id")
     val AUTH_PIN = firmwareUuid("auth_pin")
     val AUTH_STAT = firmwareUuid("auth_stat")
+    val AUTH_NAME = firmwareUuid("auth_name")
 }
 
 /** 设备端 ota_cmd 单包上限：固件里写的是 240 字节（MTU 247 减去 ATT 头后仍有余量）。 */

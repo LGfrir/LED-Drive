@@ -778,7 +778,7 @@ private fun OtaServerBlock(state: OtaUiState, actions: OtaActions) {
 
 /** 页面里的单行输入框。和原来的地址框保持同一套外观，多了密码遮罩和禁用态。 */
 @Composable
-private fun OtaField(
+internal fun OtaField(
     value: String,
     placeholder: String,
     keyboardType: KeyboardType,
