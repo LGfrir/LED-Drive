@@ -99,4 +99,9 @@ uint8_t dash_current_page(void);
 /* 点阵字模自检：把 5x7 字库全部画出来（page 0/1） */
 void dash_glyph_test(int page);
 
+/* OTA 专用屏幕：进入/更新/退出。update 以 10Hz 调用，进度条和百分比直接刷新。 */
+void dash_ota_begin(void);
+void dash_ota_update(uint8_t progress, const char *phase, const char *detail);
+void dash_ota_end(void);
+
 #endif /* DISP_DASH_H */

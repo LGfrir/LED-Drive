@@ -57,8 +57,87 @@ static void dash_task(void *arg)
     bool last_connected = false;
     ota_state_t last_ota_state = OTA_IDLE;
     uint8_t last_ota_pct = 0;
+    bool ota_screen = false;
+    TickType_t ota_hide_at = 0;
+    TickType_t ota_frame_last = 0;
 
     while (1) {
+        /* OTA 期间显示专用进度屏：10Hz 刷新，暂停普通仪表盘采样。 */
+        ota_status_t ota_now;
+        ota_get_status(&ota_now);
+        bool ota_active = ota_now.state == OTA_CONNECTING_WIFI ||
+                          ota_now.state == OTA_DOWNLOADING ||
+                          ota_now.state == OTA_VERIFYING ||
+                          ota_now.state == OTA_READY_REBOOT;
+        bool ota_terminal = ota_now.state == OTA_FAILED ||
+                            ota_now.state == OTA_ABORTED ||
+                            ota_now.state == OTA_SUCCESS;
+        TickType_t now_ticks = xTaskGetTickCount();
+
+        if (ota_active || (ota_screen && ota_terminal && now_ticks < ota_hide_at)) {
+            if (!ota_screen) {
+                dash_ota_begin();
+                ota_screen = true;
+                ota_frame_last = now_ticks;
+            }
+            if (ota_active) {
+                ota_hide_at = 0;
+            } else if (ota_hide_at == 0) {
+                ota_hide_at = now_ticks + pdMS_TO_TICKS(4000);
+            }
+
+            const char *phase = "OTA";
+            char detail[96] = "PLEASE WAIT";
+            switch (ota_now.state) {
+            case OTA_CONNECTING_WIFI:
+                phase = "CONNECT WIFI";
+                break;
+            case OTA_DOWNLOADING:
+                phase = "DOWNLOADING";
+                if (ota_now.bytes_total > 0) {
+                    snprintf(detail, sizeof(detail), "%lu / %lu KB",
+                             (unsigned long)((ota_now.bytes_read + 1023u) / 1024u),
+                             (unsigned long)((ota_now.bytes_total + 1023u) / 1024u));
+                } else {
+                    snprintf(detail, sizeof(detail), "%u%%",
+                             (unsigned)ota_now.progress);
+                }
+                break;
+            case OTA_VERIFYING:
+                phase = "VERIFYING";
+                snprintf(detail, sizeof(detail), "SHA-256 CHECK");
+                break;
+            case OTA_READY_REBOOT:
+                phase = "REBOOTING";
+                snprintf(detail, sizeof(detail), "UPDATE READY");
+                break;
+            case OTA_FAILED:
+                phase = "FAILED";
+                snprintf(detail, sizeof(detail), "%.63s", ota_now.error);
+                break;
+            case OTA_ABORTED:
+                phase = "ABORTED";
+                snprintf(detail, sizeof(detail), "CANCELLED");
+                break;
+            case OTA_SUCCESS:
+                phase = "COMPLETE";
+                snprintf(detail, sizeof(detail), "VERSION %.31s", ota_now.version);
+                break;
+            default:
+                break;
+            }
+            dash_ota_update(ota_now.progress, phase, detail);
+            /* 固定 20ms 帧周期（2 个 100Hz tick）：50Hz，画一帧约 8ms，剩余让给 WiFi。 */
+            vTaskDelayUntil(&ota_frame_last, pdMS_TO_TICKS(20));
+            continue;
+        }
+
+        if (ota_screen) {
+            dash_ota_end();
+            ota_screen = false;
+            ota_hide_at = 0;
+        }
+
         dash_status_t st;
         memset(&st, 0, sizeof(st));
 

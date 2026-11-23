@@ -331,6 +331,7 @@ static void hud_corners(void)
 /* ========================= 状态 ========================= */
 static dash_status_t s_st;
 static bool          s_st_valid = false;
+static bool          s_ota_active = false;
 
 static dash_io_t s_ios[DASH_IO_MAX];
 static uint8_t   s_io_count = 0;
@@ -809,4 +810,63 @@ void dash_glyph_test(int page)
 
     fb_flush();
     ESP_LOGI(TAG, "glyph page drawn: %d", page);
+}
+
+/* ========================= OTA 专用刷新 =========================
+ * OTA 期间由 dash_data 以 10Hz 调用，只画进度，不跑普通仪表盘逻辑。
+ * 全屏 160x128 = 40KB，SPI3 40MHz 一帧约 8ms，10Hz 只占 8% 带宽。
+ */
+void dash_ota_begin(void)
+{
+    s_ota_active = true;
+    fb_fill(C_BG);
+    fb_flush();
+}
+
+void dash_ota_update(uint8_t progress, const char *phase, const char *detail)
+{
+    if (s_fb == NULL) {
+        return;
+    }
+    if (!s_ota_active) {
+        s_ota_active = true;
+    }
+    if (progress > 100) {
+        progress = 100;
+    }
+
+    char pct[8];
+    char safe_detail[28];
+    snprintf(pct, sizeof(pct), "%u%%", (unsigned)progress);
+    trunc_copy(safe_detail, detail != NULL ? detail : "", (int)sizeof(safe_detail) - 1);
+
+    fb_fill(C_BG);
+    fb_rect(0, 0, FB_W, 2, C_ACCENT);
+    fb_text(MARGIN, 8, "OTA UPDATE", 1, C_ACCENT, C_BG);
+    fb_text_r(8, "DO NOT OFF", 1, C_DIM, C_BG);
+
+    fb_text_c(26, pct, 3, C_TEXT, C_BG);
+    fb_text_c(58, phase != NULL ? phase : "OTA", 1, C_ACCENT2, C_BG);
+    fb_text_c(70, safe_detail, 1, C_DIM, C_BG);
+
+    const int bar_x = MARGIN;
+    const int bar_y = 90;
+    const int bar_w = FB_W - 2 * MARGIN;
+    const int bar_h = 14;
+    fb_rect(bar_x, bar_y, bar_w, bar_h, C_BAR_BG);
+    int fill = (bar_w - 4) * progress / 100;
+    if (fill > 0) {
+        fb_rect(bar_x + 2, bar_y + 2, fill, bar_h - 4, C_ACCENT2);
+    }
+    fb_text_c(112, "KEEP POWER / WAIT", 1, C_DIM, C_BG);
+    fb_flush();
+}
+
+void dash_ota_end(void)
+{
+    s_ota_active = false;
+    s_st_valid = false;
+    s_rendered_page = 0xFF;
+    s_panel_dirty = true;
+    s_cpu_dirty = true;
 }

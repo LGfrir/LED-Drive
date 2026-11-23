@@ -27,3 +27,6 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 
 # OTA: new image must confirm itself or bootloader rolls back
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# Keep the existing 100 Hz tick; OTA screen refreshes at 50 Hz (2 ticks/frame).
+CONFIG_FREERTOS_HZ=100
