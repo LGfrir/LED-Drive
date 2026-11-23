@@ -870,20 +870,30 @@ void dash_ota_reboot(uint8_t seconds_left)
     if (s_fb == NULL) {
         return;
     }
-    s_ota_active = true;
+    if (!s_ota_active) {
+        dash_ota_begin();
+    }
 
     char line[18];
-    fb_fill(C_RED);
-    fb_text_c(24, "OTA COMPLETE", 1, C_BG, C_RED);
+    /* 只把 DOWNLOADING 那一行换成红色反相；标题/百分比/页脚保持原样。 */
+    fb_rect(0, 24, FB_W, 26, C_BG);
+    fb_text_c(26, "100%", 3, C_TEXT, C_BG);
+
+    const int bar_x = MARGIN;
+    const int bar_y = 90;
+    const int bar_w = FB_W - 2 * MARGIN;
+    const int bar_h = 14;
+    fb_rect(bar_x, bar_y, bar_w, bar_h, C_BAR_BG);
+    fb_rect(bar_x + 2, bar_y + 2, bar_w - 4, bar_h - 4, C_ACCENT2);
+
+    fb_rect(0, 56, FB_W, 24, C_RED);
     if (seconds_left > 0) {
         snprintf(line, sizeof(line), "REBOOT IN %u S", (unsigned)seconds_left);
-        fb_text_c(48, line, 2, C_BG, C_RED);
-        fb_text_c(78, "PLEASE WAIT", 1, C_BG, C_RED);
     } else {
-        fb_text_c(48, "REBOOTING", 2, C_BG, C_RED);
-        fb_text_c(78, "PLEASE WAIT", 1, C_BG, C_RED);
+        snprintf(line, sizeof(line), "REBOOTING");
     }
-    fb_text_c(108, "DO NOT POWER OFF", 1, C_BG, C_RED);
+    fb_text_c(58, line, 1, C_BG, C_RED);
+    fb_text_c(70, "PLEASE WAIT", 1, C_BG, C_RED);
     fb_flush();
 }
 
