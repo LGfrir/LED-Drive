@@ -11,6 +11,7 @@
 
 #include "driver/display/disp_dash.h"
 #include "driver/bt/NimBLE.h"
+#include "task/auth_svc.h"
 #include "driver/led_strip/light_mode_driver.h"
 #include "driver/preset/light_preset.h"
 #include "task/clock_scheduler.h"
@@ -125,7 +126,7 @@ static void dash_task(void *arg)
         bool connected = nimble_is_connected();
         dash_ble_t ble;
         memset(&ble, 0, sizeof(ble));
-        ble.device_name = DEVICE_NAME;
+        ble.device_name = auth_device_name();
         ble.connected = connected;
         ble.peer_name = connected ? "PHONE" : "NO LINK";
         ble.rssi = nimble_get_rssi();
