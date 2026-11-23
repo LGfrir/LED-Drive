@@ -74,8 +74,22 @@ object GattId {
     val EDIT_CMT = firmwareUuid("edit_cmt")
     val DEVINFO = firmwareUuid("devinfo")
 
+    val OTA_SVC = firmwareUuid("ota_svc")
+    val OTA_CMD = firmwareUuid("ota_cmd")
+    val OTA_STAT = firmwareUuid("ota_stat")
+    val OTA_INFO = firmwareUuid("ota_info")
+
     val IO_SVC_LE: ByteArray = firmwareUuidBytes("io_svc")
+
+    /* 设备鉴权：写 auth_id（16B UUID + 1B 名称长度 + 名称），再写 auth_pin */
+    val AUTH_SVC = firmwareUuid("auth_svc")
+    val AUTH_ID = firmwareUuid("auth_id")
+    val AUTH_PIN = firmwareUuid("auth_pin")
+    val AUTH_STAT = firmwareUuid("auth_stat")
 }
+
+/** 设备端 ota_cmd 单包上限：固件里写的是 240 字节（MTU 247 减去 ATT 头后仍有余量）。 */
+const val OTA_CMD_MAX = 240
 
 const val MODE_OFF = 0
 const val MODE_WAVE = 1

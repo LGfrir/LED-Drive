@@ -28,6 +28,7 @@ import com.lgfrir.leddrivebt.protocol.IoNode
 import com.lgfrir.leddrivebt.protocol.MODE_FLASH
 import com.lgfrir.leddrivebt.protocol.MODE_OFF
 import com.lgfrir.leddrivebt.protocol.OpResult
+import com.lgfrir.leddrivebt.protocol.OTA_CMD_MAX
 import com.lgfrir.leddrivebt.protocol.PacketException
 import com.lgfrir.leddrivebt.protocol.PresetHead
 import com.lgfrir.leddrivebt.protocol.PresetRecord
@@ -92,6 +93,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import java.io.ByteArrayOutputStream
+import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
 import java.util.ArrayDeque
 import java.util.Date
@@ -294,6 +296,51 @@ class LightBleClient(context: Context) {
 
     /* connectGatt(..., Handler) 在 API 33 标了 deprecated（改用 Executor 版），
      * 但 minSdk 是 26，26~32 只能用 Handler 版，这里保留并压掉警告。 */
+    /**
+     * 设备鉴权：auth_id（16B UUID + 1B 名称长度 + 名称）→ auth_pin（默认 123456）。
+     * 已识别过的 UUID 在 auth_id 之后直接放行，不需要再写 PIN。
+     */
+    private suspend fun authenticate() {
+        val uuid = authUuid()
+        val name = "Android Phone".toByteArray(Charsets.US_ASCII)
+        val payload = ByteArray(16 + 1 + name.size)
+        uuid.copyInto(payload, 0)
+        payload[16] = name.size.toByte()
+        name.copyInto(payload, 17)
+
+        write(GattId.AUTH_SVC, GattId.AUTH_ID, payload)
+        var stat = read(GattId.AUTH_SVC, GattId.AUTH_STAT)
+        if (stat.isEmpty() || stat[0].toInt() != 1) {
+            write(GattId.AUTH_SVC, GattId.AUTH_PIN, "123456".toByteArray(Charsets.US_ASCII))
+            stat = read(GattId.AUTH_SVC, GattId.AUTH_STAT)
+        }
+        if (stat.isEmpty() || stat[0].toInt() != 1) {
+            throw BleException("设备鉴权失败：PIN 123456 不正确或未授权")
+        }
+    }
+
+    /** 本机在设备上的稳定身份 UUID，首次连接生成并持久化。 */
+    private fun authUuid(): ByteArray {
+        val prefs = appContext.getSharedPreferences("leddrive-auth", Context.MODE_PRIVATE)
+        val saved = prefs.getString("uuid", null)
+        if (saved != null && saved.length == 32) {
+            runCatching {
+                return ByteArray(16) { i ->
+                    saved.substring(i * 2, i * 2 + 2).toInt(16).toByte()
+                }
+            }
+        }
+        val uuid = UUID.randomUUID()
+        val bytes = ByteBuffer.allocate(16)
+            .putLong(uuid.mostSignificantBits)
+            .putLong(uuid.leastSignificantBits)
+            .array()
+        prefs.edit()
+            .putString("uuid", bytes.joinToString("") { "%02x".format(it.toInt() and 0xFF) })
+            .apply()
+        return bytes
+    }
+
     @SuppressLint("MissingPermission")
     @Suppress("DEPRECATION")
     private suspend fun connectAttempt(address: String, refreshCache: Boolean) {
@@ -336,10 +383,13 @@ class LightBleClient(context: Context) {
                 showStep(2, "发现服务")
                 discover()
                 note("灯带→手机", "发现服务", true, "GATT 就绪")
-                showStep(3, "订阅通知")
+                showStep(3, "设备鉴权")
+                authenticate()
+                note("灯带→手机", "设备鉴权", true, "已通过")
+                showStep(4, "订阅通知")
                 enableNotify(GattId.IO_SVC, GattId.IO_TOPOLOGY)
                 note("灯带→手机", "订阅通知", true, "io_topology")
-                showStep(4, "读取灯段")
+                showStep(5, "读取灯段")
                 val topology = parseTopology(read(GattId.IO_SVC, GattId.IO_TOPOLOGY))
                 note(
                     "灯带→手机",
@@ -347,7 +397,7 @@ class LightBleClient(context: Context) {
                     true,
                     "拓扑 · ${topology.size} 路 / ${topology.sumOf { it.segments.size }} 段",
                 )
-                showStep(5, "正在对时")
+                showStep(6, "正在对时")
                 bootstrapClock()
                 /*
                  * 对时会让定时模式按当前时间套上预设。颜色必须在这之后读，
@@ -357,7 +407,7 @@ class LightBleClient(context: Context) {
                 selectedIo = null
                 selectedSeg = null
                 _connected.value = true
-                showStep(6, "同步调度")
+                showStep(7, "同步调度")
                 note("灯带→手机", "连接", true, "完成 · MTU ${_mtu.value}")
             } catch (error: Exception) {
                 val reason = if (abortConnect) "已断开" else (error.message ?: "连接失败")
@@ -497,6 +547,42 @@ class LightBleClient(context: Context) {
     suspend fun writeChase(segId: Int, bytes: ByteArray) = writeConfig(segId, GattId.CHASE, bytes)
     suspend fun writePoints(segId: Int, bytes: ByteArray) = writeConfig(segId, GattId.POINTS, bytes)
     suspend fun writeFlash(segId: Int, bytes: ByteArray) = writeConfig(segId, GattId.FLASH, bytes)
+
+    /* ---------- OTA 控制 ---------- */
+
+    /** 读设备 OTA 信息（JSON）：版本、运行分区、是否支持 OTA。 */
+    suspend fun readOtaInfo(): String = gate.withLock {
+        readJson(GattId.OTA_SVC, GattId.OTA_INFO)
+    }
+
+    /** 读设备 OTA 状态（JSON）：state/progress/read/total/version/error。 */
+    suspend fun readOtaStatus(): String = gate.withLock {
+        readJson(GattId.OTA_SVC, GattId.OTA_STAT)
+    }
+
+    /**
+     * 发 START 命令。payload 由 [OtaBleLink] 按固件协议打包。
+     * 固件里 ota_cmd 单包限 240 字节，超过时直接拒绝，不交给 BLE 栈去截断。
+     */
+    suspend fun startOta(payload: ByteArray) = gate.withLock {
+        if (payload.isEmpty()) throw BleException("OTA 命令是空的")
+        if (payload.size > OTA_CMD_MAX) {
+            throw BleException("OTA 命令有 ${payload.size} 字节，设备单包最多收 $OTA_CMD_MAX 字节")
+        }
+        write(GattId.OTA_SVC, GattId.OTA_CMD, payload)
+        note("手机→灯带", "OTA 升级", true, "已发送 START · ${payload.size} 字节")
+    }
+
+    /** 发 ABORT 命令。设备没在升级时会拒绝这次写入。 */
+    suspend fun abortOta() = gate.withLock {
+        write(GattId.OTA_SVC, GattId.OTA_CMD, byteArrayOf(2))
+        note("手机→灯带", "OTA 升级", true, "已发送 ABORT")
+    }
+
+    private suspend fun readJson(service: UUID, id: UUID): String {
+        val raw = read(service, id)
+        return String(raw, Charsets.UTF_8).trimEnd('\u0000')
+    }
 
     fun close() {
         stopScan()

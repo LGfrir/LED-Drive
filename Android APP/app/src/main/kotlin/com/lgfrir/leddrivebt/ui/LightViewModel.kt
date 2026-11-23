@@ -104,8 +104,8 @@ class LightViewModel(app: Application) : AndroidViewModel(app) {
     val clockNote = ble.clockNote
     val devInfo = ble.devInfo
     /**
-     * OTA 页面状态。设备端 OTA 服务还没实现，[OtaController.link] 保持 null，
-     * 页面上的操作只会改提示、不会发送升级数据。接入 BLE 命令时在这里装 link。
+     * OTA 页面状态。link 在 init 里装成 [OtaBleLink]，复用现有 BLE 连接。
+     * 手机本地 HTTP 服务还没实现，本地热点模式只保留提示、不会发送升级命令。
      */
     val ota = OtaController()
     val ioModes = ble.ioModes
@@ -136,6 +136,7 @@ class LightViewModel(app: Application) : AndroidViewModel(app) {
     private var libraryJob: Job? = null
 
     init {
+        ota.link = OtaBleLink(ble, ota, viewModelScope)
         reloadBackdrop()
         if (ble.connected.value) holdConnection()
         viewModelScope.launch {
