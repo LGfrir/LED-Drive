@@ -127,8 +127,8 @@ static void dash_task(void *arg)
                 break;
             }
             dash_ota_update(ota_now.progress, phase, detail);
-            /* 固定 20ms 帧周期（2 个 100Hz tick）：50Hz，画一帧约 8ms，剩余让给 WiFi。 */
-            vTaskDelayUntil(&ota_frame_last, pdMS_TO_TICKS(20));
+            /* 100/3 FPS：30ms 一帧；只刷动态区，避免全屏重绘闪烁。 */
+            vTaskDelayUntil(&ota_frame_last, pdMS_TO_TICKS(30));
             continue;
         }
 

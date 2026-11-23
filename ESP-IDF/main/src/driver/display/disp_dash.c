@@ -820,6 +820,11 @@ void dash_ota_begin(void)
 {
     s_ota_active = true;
     fb_fill(C_BG);
+    fb_rect(0, 0, FB_W, 2, C_ACCENT);
+    fb_text(MARGIN, 8, "OTA UPDATE", 1, C_ACCENT, C_BG);
+    fb_text_r(8, "DO NOT OFF", 1, C_DIM, C_BG);
+    fb_rect(MARGIN, 18, FB_W - 2 * MARGIN, 1, C_LINE);
+    fb_text_c(112, "KEEP POWER / WAIT", 1, C_DIM, C_BG);
     fb_flush();
 }
 
@@ -829,7 +834,7 @@ void dash_ota_update(uint8_t progress, const char *phase, const char *detail)
         return;
     }
     if (!s_ota_active) {
-        s_ota_active = true;
+        dash_ota_begin();
     }
     if (progress > 100) {
         progress = 100;
@@ -840,12 +845,10 @@ void dash_ota_update(uint8_t progress, const char *phase, const char *detail)
     snprintf(pct, sizeof(pct), "%u%%", (unsigned)progress);
     trunc_copy(safe_detail, detail != NULL ? detail : "", (int)sizeof(safe_detail) - 1);
 
-    fb_fill(C_BG);
-    fb_rect(0, 0, FB_W, 2, C_ACCENT);
-    fb_text(MARGIN, 8, "OTA UPDATE", 1, C_ACCENT, C_BG);
-    fb_text_r(8, "DO NOT OFF", 1, C_DIM, C_BG);
-
+    /* 只重画动态区域：百分比、阶段、明细、进度条。静态标题/页脚不碰。 */
+    fb_rect(0, 24, FB_W, 26, C_BG);
     fb_text_c(26, pct, 3, C_TEXT, C_BG);
+    fb_rect(0, 56, FB_W, 24, C_BG);
     fb_text_c(58, phase != NULL ? phase : "OTA", 1, C_ACCENT2, C_BG);
     fb_text_c(70, safe_detail, 1, C_DIM, C_BG);
 
@@ -858,7 +861,6 @@ void dash_ota_update(uint8_t progress, const char *phase, const char *detail)
     if (fill > 0) {
         fb_rect(bar_x + 2, bar_y + 2, fill, bar_h - 4, C_ACCENT2);
     }
-    fb_text_c(112, "KEEP POWER / WAIT", 1, C_DIM, C_BG);
     fb_flush();
 }
 
