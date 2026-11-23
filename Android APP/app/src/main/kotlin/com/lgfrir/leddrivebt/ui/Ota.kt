@@ -702,21 +702,22 @@ private fun OtaProgressScreen(state: OtaUiState, onCancel: () -> Unit) {
         ?: state.serverUrl.takeIf { it.isNotBlank() }
         ?: "固件文件"
 
+    val cardShape = RoundedCornerShape(Radius.large)
     Box(
         Modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(palette.page, palette.surface),
-                ),
-            ),
+            .background(palette.page.copy(alpha = 0.38f)),
+        contentAlignment = Alignment.Center,
     ) {
         Column(
             Modifier
-                .fillMaxSize()
-                .padding(horizontal = Space.x4, vertical = Space.x6),
+                .fillMaxWidth()
+                .padding(horizontal = Space.x4)
+                .clip(cardShape)
+                .background(palette.surface.copy(alpha = 0.94f))
+                .border(1.dp, palette.hairline.copy(alpha = 0.7f), cardShape)
+                .padding(horizontal = Space.x4, vertical = Space.x4),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.SpaceBetween,
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
@@ -785,6 +786,7 @@ private fun OtaProgressScreen(state: OtaUiState, onCancel: () -> Unit) {
                 )
             }
 
+            Spacer(Modifier.height(Space.x4))
             Column(
                 Modifier.fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally,
