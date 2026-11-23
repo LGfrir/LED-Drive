@@ -102,7 +102,7 @@ void dash_glyph_test(int page);
 /* OTA 专用屏幕：进入/更新/退出。update 以 10Hz 调用，进度条和百分比直接刷新。 */
 void dash_ota_begin(void);
 void dash_ota_update(uint8_t progress, const char *phase, const char *detail);
-void dash_ota_reboot(uint8_t seconds_left); /* 0 = REBOOTING，红色反相 */
+void dash_ota_reboot(uint8_t seconds_left, bool inverse); /* 0 = REBOOTING */
 void dash_ota_end(void);
 
 #endif /* DISP_DASH_H */

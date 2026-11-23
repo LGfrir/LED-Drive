@@ -62,6 +62,7 @@ static void dash_task(void *arg)
     TickType_t ota_frame_last = 0;
     TickType_t ota_reboot_at = 0;
     uint8_t last_reboot_left = 0xFF;
+    uint8_t last_reboot_inverse = 0xFF;
 
     while (1) {
         /* OTA 期间显示专用进度屏：10Hz 刷新，暂停普通仪表盘采样。 */
@@ -80,6 +81,7 @@ static void dash_task(void *arg)
             if (ota_reboot_at == 0) {
                 ota_reboot_at = now_ticks;
                 last_reboot_left = 0xFF;
+                last_reboot_inverse = 0xFF;
                 ota_screen = true;
             }
             uint32_t elapsed_ms = (uint32_t)(now_ticks - ota_reboot_at) * portTICK_PERIOD_MS;
@@ -87,15 +89,19 @@ static void dash_task(void *arg)
                           : (elapsed_ms < 2000u) ? 2
                           : (elapsed_ms < 3000u) ? 1
                                                  : 0;
-            if (left != last_reboot_left) {
-                dash_ota_reboot(left);
+            bool inverse = (left == 0) ||
+                           ((((now_ticks - ota_reboot_at) / pdMS_TO_TICKS(500)) & 1u) == 0u);
+            if (left != last_reboot_left || (uint8_t)inverse != last_reboot_inverse) {
+                dash_ota_reboot(left, inverse);
                 last_reboot_left = left;
+                last_reboot_inverse = (uint8_t)inverse;
             }
             vTaskDelay(pdMS_TO_TICKS(50));
             continue;
         }
         ota_reboot_at = 0;
         last_reboot_left = 0xFF;
+        last_reboot_inverse = 0xFF;
 
         if (ota_active || (ota_screen && ota_terminal && now_ticks < ota_hide_at)) {
             if (!ota_screen) {

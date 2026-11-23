@@ -333,6 +333,7 @@ static void hud_corners(void)
 static dash_status_t s_st;
 static bool          s_st_valid = false;
 static bool          s_ota_active = false;
+static uint8_t       s_ota_reboot_seconds = 0xFF;
 
 static dash_io_t s_ios[DASH_IO_MAX];
 static uint8_t   s_io_count = 0;
@@ -820,6 +821,7 @@ void dash_glyph_test(int page)
 void dash_ota_begin(void)
 {
     s_ota_active = true;
+    s_ota_reboot_seconds = 0xFF;
     fb_fill(C_BG);
     fb_rect(0, 0, FB_W, 2, C_ACCENT);
     fb_text(MARGIN, 8, "OTA UPDATE", 1, C_ACCENT, C_BG);
@@ -865,7 +867,7 @@ void dash_ota_update(uint8_t progress, const char *phase, const char *detail)
     fb_flush();
 }
 
-void dash_ota_reboot(uint8_t seconds_left)
+void dash_ota_reboot(uint8_t seconds_left, bool inverse)
 {
     if (s_fb == NULL) {
         return;
@@ -875,31 +877,41 @@ void dash_ota_reboot(uint8_t seconds_left)
     }
 
     char line[18];
-    /* 只把 DOWNLOADING 那一行换成红色反相；标题/百分比/页脚保持原样。 */
-    fb_rect(0, 24, FB_W, 26, C_BG);
-    fb_text_c(26, "100%", 3, C_TEXT, C_BG);
+    if (seconds_left != s_ota_reboot_seconds) {
+        /* 秒数变化时才重画百分比/进度条；平时只闪下面一行。 */
+        s_ota_reboot_seconds = seconds_left;
+        fb_rect(0, 24, FB_W, 26, C_BG);
+        fb_text_c(26, "100%", 3, C_TEXT, C_BG);
 
-    const int bar_x = MARGIN;
-    const int bar_y = 90;
-    const int bar_w = FB_W - 2 * MARGIN;
-    const int bar_h = 14;
-    fb_rect(bar_x, bar_y, bar_w, bar_h, C_BAR_BG);
-    fb_rect(bar_x + 2, bar_y + 2, bar_w - 4, bar_h - 4, C_ACCENT2);
+        const int bar_x = MARGIN;
+        const int bar_y = 90;
+        const int bar_w = FB_W - 2 * MARGIN;
+        const int bar_h = 14;
+        fb_rect(bar_x, bar_y, bar_w, bar_h, C_BAR_BG);
+        fb_rect(bar_x + 2, bar_y + 2, bar_w - 4, bar_h - 4, C_ACCENT2);
+    }
 
-    fb_rect(0, 56, FB_W, 24, C_RED);
+    bool red = (seconds_left == 0) || inverse;
+    uint16_t bg = red ? C_RED : C_BG;
+    uint16_t fg = red ? C_BG : C_ACCENT2;
+    uint16_t sub = red ? C_BG : C_DIM;
+
+    /* 只把 DOWNLOADING 那一行做 500ms 反相/正常切换。 */
+    fb_rect(0, 56, FB_W, 24, bg);
     if (seconds_left > 0) {
         snprintf(line, sizeof(line), "REBOOT IN %u S", (unsigned)seconds_left);
     } else {
         snprintf(line, sizeof(line), "REBOOTING");
     }
-    fb_text_c(58, line, 1, C_BG, C_RED);
-    fb_text_c(70, "PLEASE WAIT", 1, C_BG, C_RED);
+    fb_text_c(58, line, 1, fg, bg);
+    fb_text_c(70, "PLEASE WAIT", 1, sub, bg);
     fb_flush();
 }
 
 void dash_ota_end(void)
 {
     s_ota_active = false;
+    s_ota_reboot_seconds = 0xFF;
     s_st_valid = false;
     s_rendered_page = 0xFF;
     s_panel_dirty = true;
