@@ -103,6 +103,11 @@ class LightViewModel(app: Application) : AndroidViewModel(app) {
     val clockReady = ble.clockReady
     val clockNote = ble.clockNote
     val devInfo = ble.devInfo
+    /**
+     * OTA 页面状态。设备端 OTA 服务还没实现，[OtaController.link] 保持 null，
+     * 页面上的操作只会改提示、不会发送升级数据。接入 BLE 命令时在这里装 link。
+     */
+    val ota = OtaController()
     val ioModes = ble.ioModes
     val clockStat = ble.clockStat
     val synced = ble.synced

@@ -198,6 +198,7 @@ private enum class Desk(val depth: Int) {
     ScheduleBoard(1),
     SlotEdit(2),
     Backup(1),
+    Ota(2),
 }
 
 @Composable
@@ -398,7 +399,8 @@ fun LightApp(model: LightViewModel) {
                         model.bindingSaved.collect { desk = Desk.Work }
                     }
                     LaunchedEffect(ui.phase) {
-                        val devicePage = desk != Desk.Work && desk != Desk.Settings && desk != Desk.Appearance && desk != Desk.Log
+                        val devicePage = desk != Desk.Work && desk != Desk.Settings && desk != Desk.Appearance &&
+                            desk != Desk.Log && desk != Desk.Ota
                         if (ui.phase == LinkPhase.Dropped || (ui.phase == LinkPhase.Idle && devicePage)) {
                             desk = Desk.Work
                             boardPreview = false
@@ -422,6 +424,7 @@ fun LightApp(model: LightViewModel) {
                             desk == Desk.ScheduleEdit -> closeSchedule()
                             desk == Desk.Log -> desk = Desk.Settings
                             desk == Desk.Appearance -> desk = Desk.Settings
+                            desk == Desk.Ota -> desk = Desk.Settings
                             desk == Desk.Settings -> desk = Desk.Work
                             desk == Desk.SlotEdit -> desk = Desk.Work
                             else -> desk = Desk.Work
@@ -468,6 +471,7 @@ fun LightApp(model: LightViewModel) {
                                     MenuRow("外观") { desk = Desk.Appearance }
                                     MenuRow("日志") { desk = Desk.Log }
                                     MenuRow("备份") { desk = Desk.Backup }
+                                    MenuRow("固件升级") { desk = Desk.Ota }
                                 }
                                 AcrylicGroup {
                                     Row(
@@ -658,6 +662,17 @@ fun LightApp(model: LightViewModel) {
                             Desk.Backup -> LibraryPage("备份", { desk = Desk.Work }) {
                                 val context = LocalContext.current
                                 BackupActions(ui.message, { model.exportBackup(context) }, model::importBackup)
+                            }
+                            Desk.Ota -> AppChrome("固件升级", onBack = { desk = Desk.Settings }) {
+                                val devInfo by model.devInfo.collectAsStateWithLifecycle()
+                                LaunchedEffect(devInfo?.fw) {
+                                    model.ota.applyDeviceVersion(devInfo?.fw)
+                                }
+                                OtaScreen(
+                                    state = model.ota.state,
+                                    actions = model.ota.actions,
+                                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                                )
                             }
                             Desk.Work -> {
                                 if (ui.page == Page.Segment) {
