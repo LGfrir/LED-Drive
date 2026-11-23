@@ -45,6 +45,7 @@ typedef struct {
     bool used;
     bool mute;
     bool dma; /* 这一路是不是 DMA。ESP32-S3 只有 1 个 RMT 通道支持 DMA，其余都是 0 */
+    uint32_t last_mw; /* 最近一帧按实际 RGB 估算的 12V 功率（mW） */
 } light_io_t;
 
 static light_io_t s_ios[LIGHT_IO_MAX];
@@ -207,6 +208,20 @@ static void compose_frame(light_io_t *io)
             dst->b = (uint8_t)((uint16_t)src.b * gain / (255 * 255));
         }
     }
+
+    /*
+     * 按实际发送帧估算 12V 功率：
+     * 全白 1A/160 颗 = 6.25mA/颗 = 75mW/颗；
+     * 单颗按 (r+g+b)/765 缩放，整条累加。
+     */
+    uint32_t rgb_sum = 0;
+    for (uint16_t i = 0; i < io->led_count; i++) {
+        rgb_sum += (uint32_t)io->tx[i].r + io->tx[i].g + io->tx[i].b;
+    }
+    uint32_t mw = (rgb_sum * 75u) / 765u;
+    portENTER_CRITICAL(&s_lock);
+    io->last_mw = mw;
+    portEXIT_CRITICAL(&s_lock);
 }
 
 static void render_io(light_io_t *io, uint32_t delta_ms)
@@ -273,6 +288,9 @@ static void light_io_task(void *arg)
         if (mute) {
             /* 静默：只发全 0，不渲染动画 */
             memset(io->tx, 0, (size_t)io->led_count * sizeof(color_t));
+            portENTER_CRITICAL(&s_lock);
+            io->last_mw = 0;
+            portEXIT_CRITICAL(&s_lock);
             if (io->show != NULL) {
                 io->show(io->show_ctx, io->tx, io->led_count);
             }
@@ -474,6 +492,23 @@ esp_err_t light_io_set_refresh(uint8_t io_id, uint16_t refresh_ms)
     io->refresh_ms = refresh_ms;
     portEXIT_CRITICAL(&s_lock);
     persist_io(io_id);
+    return ESP_OK;
+}
+
+esp_err_t light_io_get_power_mw(uint8_t io_id, uint32_t *mw)
+{
+    if (mw == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    portENTER_CRITICAL(&s_lock);
+    light_io_t *io = io_find_locked(io_id);
+    if (io == NULL) {
+        portEXIT_CRITICAL(&s_lock);
+        return ESP_ERR_NOT_FOUND;
+    }
+    *mw = io->last_mw;
+    portEXIT_CRITICAL(&s_lock);
     return ESP_OK;
 }
 

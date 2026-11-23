@@ -12,12 +12,16 @@
  */
 
 #include "driver/bt/NimBLE.h"
+#include "driver/display/dash_data.h"
+#include "driver/display/disp_dash.h"
+#include "driver/display/lcd.h"
 #include "driver/led_strip/light_mode_driver.h"
 #include "driver/preset/light_preset.h"
 #include "driver/timer/local_clock.h"
 #include "driver/timer/time_sync.h"
 #include "driver/ws2812/ws2812_rmt.h"
 #include "driver/ws2812/ws2812_spi.h"
+#include "task/auth_svc.h"
 #include "task/clock_scheduler.h"
 #include "task/gatt_svc.h"
 
@@ -29,6 +33,22 @@
 #include <time.h>
 
 static const char *TAG = "main";
+
+/*
+ * 屏幕板（spiscreentest 的 COM4 测试板）和 LEDDrive 原板引脚不同：
+ *   TEST_BOARD: 屏 9/10/13/12/11/14，灯带临时挪到 GPIO1/7，避开背光 14
+ *   原板:       屏 9/10/15/16/17/18，灯带 GPIO14/4
+ * 默认编译原板；测试板用 -DTEST_BOARD=1。
+ */
+#ifdef TEST_BOARD
+#define IO1_GPIO GPIO_NUM_1
+#define IO2_GPIO GPIO_NUM_7
+static const lcd_pins_t s_lcd_pins = LCD_PINS_TEST_BOARD;
+#else
+#define IO1_GPIO GPIO_NUM_14
+#define IO2_GPIO GPIO_NUM_4
+static const lcd_pins_t s_lcd_pins = LCD_PINS_LEDDRIVE_ORIG;
+#endif
 
 /*
  * 两路，每路 160 颗，三段 32 + 96 + 32。
@@ -69,9 +89,9 @@ typedef struct {
 } io_desc_t;
 
 static const io_desc_t s_ios[] = {
-    { .io_id = 1, .name = "笔记本", .gpio = GPIO_NUM_14, .bus = IO_BUS_RMT,
+    { .io_id = 1, .name = "笔记本", .gpio = IO1_GPIO, .bus = IO_BUS_RMT,
       .led_count = 160, .segs = s_segs_io1, .seg_count = 3 },
-    { .io_id = 2, .name = "手办",   .gpio = GPIO_NUM_4, .sclk = GPIO_NUM_5,
+    { .io_id = 2, .name = "手办",   .gpio = IO2_GPIO, .sclk = GPIO_NUM_5,
       .bus = IO_BUS_SPI, .led_count = 160, .segs = s_segs_io2, .seg_count = 3 },
 };
 
@@ -162,7 +182,24 @@ void app_main(void)
     /* 调度器要在灯段建好之后启动：时间模式 + 未对时会立刻静默 */
     ESP_ERROR_CHECK(clock_scheduler_init());
 
+    /*
+     * 屏幕是可选的：ST7735 初始化失败只打日志，不影响灯带和 BLE。
+     * 原板接线：SCLK=9 / MOSI=10 / CS=15 / DC=16 / RST=17 / BL=18。
+     */
+    esp_err_t disp_err = lcd_init_ex(&s_lcd_pins);
+    if (disp_err == ESP_OK) {
+        disp_err = dash_init();
+    }
+    if (disp_err == ESP_OK) {
+        dash_data_start();
+        lcd_backlight(true);
+        ESP_LOGI(TAG, "display ready (ST7735 dashboard, SPI3)");
+    } else {
+        ESP_LOGW(TAG, "display disabled: %s", esp_err_to_name(disp_err));
+    }
+
     time_sync_init(gatt_svc_time_request);
+    auth_init();
 
     nimble_init_as_prph();
 }

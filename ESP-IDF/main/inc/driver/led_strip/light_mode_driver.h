@@ -55,6 +55,9 @@ esp_err_t light_io_set_brightness(uint8_t io_id, uint8_t brightness);
 esp_err_t light_io_set_refresh(uint8_t io_id, uint16_t refresh_ms);
 esp_err_t light_io_get(uint8_t io_id, uint8_t *brightness, uint16_t *refresh_ms, uint16_t *led_count);
 
+/* 最近一帧按实际 RGB 估算的 12V 功率（mW，全白 160 颗 = 12000） */
+esp_err_t light_io_get_power_mw(uint8_t io_id, uint32_t *mw);
+
 /* 时间模式未对时的时候整条 IO 静默：只发全 0，不跑灯效 */
 esp_err_t light_io_set_mute(uint8_t io_id, bool mute);
 

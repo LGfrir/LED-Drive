@@ -5,6 +5,7 @@
  */
 
 #include "driver/bt/NimBLE.h"
+#include "task/auth_svc.h"
 #include "task/gatt_svc.h"
 #include "driver/timer/time_sync.h"
 
@@ -12,6 +13,7 @@
 #include <string.h>
 
 #include "esp_err.h"
+#include "esp_timer.h"
 #include "host/ble_att.h"
 
 #define NOTIFY_MAX_CONN CONFIG_BT_NIMBLE_MAX_CONNECTIONS
@@ -31,6 +33,41 @@ static uint16_t s_preset_data_val_handle;
 static uint16_t s_result_val_handle;
 static const char *TAG = "NIMBLE";
 
+/* 仪表盘 BLE 状态（单连接） */
+static volatile bool s_connected;
+static uint16_t s_conn_handle;
+static int64_t s_conn_start_us;
+
+bool nimble_is_connected(void)
+{
+    return s_connected;
+}
+
+int8_t nimble_get_rssi(void)
+{
+    if (!s_connected) {
+        return 0;
+    }
+    int8_t rssi = 0;
+    if (ble_gap_conn_rssi(s_conn_handle, &rssi) != 0) {
+        return 0;
+    }
+    return rssi;
+}
+
+uint16_t nimble_get_mtu(void)
+{
+    return s_connected ? ble_att_mtu(s_conn_handle) : 0;
+}
+
+uint32_t nimble_get_conn_seconds(void)
+{
+    if (!s_connected) {
+        return 0;
+    }
+    return (uint32_t)((esp_timer_get_time() - s_conn_start_us) / 1000000);
+}
+
 void ble_store_config_init(void);
 
 /* 前置声明:bleprph_advertise 定义在本文件后面,但 bleprph_gap_event 要调用它 */
@@ -47,6 +84,9 @@ static int bleprph_gap_event(struct ble_gap_event *event, void *arg) {
             if (event->connect.status != 0) {
                 bleprph_advertise();
             } else {
+                s_conn_handle = event->connect.conn_handle;
+                s_conn_start_us = esp_timer_get_time();
+                s_connected = true;
                 time_sync_on_connect(event->connect.conn_handle);
             }
             return 0;
@@ -67,7 +107,10 @@ static int bleprph_gap_event(struct ble_gap_event *event, void *arg) {
                 ESP_LOGW(TAG, "断开时没找到订阅记录 conn=%d", event->disconnect.conn.conn_handle);
             }
 
+            s_connected = false;
+            s_conn_handle = 0;
             time_sync_on_disconnect();
+            auth_on_disconnect();
             bleprph_advertise();
             return 0;
         }
@@ -279,7 +322,7 @@ void nimble_init_as_prph() {
     assert(rc == 0);
     // 设备名注册
 
-    rc = ble_svc_gap_device_name_set(DEVICE_NAME);
+    rc = ble_svc_gap_device_name_set(auth_device_name());
     assert(rc == 0);
 
     //不懂

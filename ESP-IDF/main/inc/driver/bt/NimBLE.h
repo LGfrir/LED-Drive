@@ -7,6 +7,9 @@
 #ifndef __NIMBLE_H__
 #define __NIMBLE_H__
 
+#include <stdbool.h>
+#include <stdint.h>
+
 #include "esp_log.h"
 #include "nvs_flash.h"
 /* BLE */
@@ -21,5 +24,11 @@
 #define DEVICE_NAME "LEDDrive"
 
 void nimble_init_as_prph(void);
+
+/* 仪表盘用的 BLE 状态 */
+bool nimble_is_connected(void);
+int8_t nimble_get_rssi(void);
+uint16_t nimble_get_mtu(void);
+uint32_t nimble_get_conn_seconds(void);
 
 #endif /* __NIMBLE_H__ */

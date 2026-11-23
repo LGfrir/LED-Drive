@@ -13,6 +13,10 @@ idf_component_register(
         "src/task/clock_scheduler.c"
         "src/task/gatt_svc.c"
         "src/task/gatt_time_svc.c"
+        "src/task/auth_svc.c"
+        "src/driver/display/lcd.c"
+        "src/driver/display/disp_dash.c"
+        "src/driver/display/dash_data.c"
     INCLUDE_DIRS
         "inc"
     REQUIRES
@@ -21,6 +25,13 @@ idf_component_register(
         esp_driver_gpio
         esp_driver_rmt
         esp_driver_spi
+        esp_lcd
         esp_timer
         freertos
 )
+
+target_compile_definitions(${COMPONENT_LIB} PUBLIC LCD_SPI_HOST=SPI3_HOST)
+
+if(TEST_BOARD)
+    target_compile_definitions(${COMPONENT_LIB} PUBLIC TEST_BOARD=1)
+endif()

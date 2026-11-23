@@ -244,6 +244,49 @@ int preset_svc_callback(uint16_t conn_handle, uint16_t attr_handle,
                         struct ble_gatt_access_ctxt *ctxt, void *arg);
 int sched_svc_callback(uint16_t conn_handle, uint16_t attr_handle,
                        struct ble_gatt_access_ctxt *ctxt, void *arg);
+int auth_svc_callback(uint16_t conn_handle, uint16_t attr_handle,
+                      struct ble_gatt_access_ctxt *ctxt, void *arg);
+
+#define AUTH_SVC_UUID_REG BLE_UUID128_INIT \
+(0x61,0x75,0x74,0x68,0x5f,0x73,0x76,0x63,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00)
+/* ASCII: auth_svc */
+
+#define AUTH_CHR_ID_UUID_REG BLE_UUID128_INIT \
+(0x61,0x75,0x74,0x68,0x5f,0x69,0x64,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00)
+/* ASCII: auth_id */
+
+#define AUTH_CHR_PIN_UUID_REG BLE_UUID128_INIT \
+(0x61,0x75,0x74,0x68,0x5f,0x70,0x69,0x6e,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00)
+/* ASCII: auth_pin */
+
+#define AUTH_CHR_STAT_UUID_REG BLE_UUID128_INIT \
+(0x61,0x75,0x74,0x68,0x5f,0x73,0x74,0x61,0x74,0x00,0x00,0x00,0x00,0x00,0x00,0x00)
+/* ASCII: auth_stat */
+
+#define AUTH_CHR_CHG_UUID_REG BLE_UUID128_INIT \
+(0x61,0x75,0x74,0x68,0x5f,0x63,0x68,0x67,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00)
+/* ASCII: auth_chg */
+
+#define AUTH_CHR_LST_UUID_REG BLE_UUID128_INIT \
+(0x61,0x75,0x74,0x68,0x5f,0x6c,0x73,0x74,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00)
+/* ASCII: auth_lst */
+
+#define AUTH_CHR_DEL_UUID_REG BLE_UUID128_INIT \
+(0x61,0x75,0x74,0x68,0x5f,0x64,0x65,0x6c,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00)
+/* ASCII: auth_del */
+
+#define AUTH_CHR_NAME_UUID_REG BLE_UUID128_INIT \
+(0x61,0x75,0x74,0x68,0x5f,0x6e,0x61,0x6d,0x65,0x00,0x00,0x00,0x00,0x00,0x00,0x00)
+/* ASCII: auth_name */
+
+static const ble_uuid128_t AUTH_SVC_UUID      = AUTH_SVC_UUID_REG;
+static const ble_uuid128_t AUTH_CHR_ID_UUID   = AUTH_CHR_ID_UUID_REG;
+static const ble_uuid128_t AUTH_CHR_PIN_UUID  = AUTH_CHR_PIN_UUID_REG;
+static const ble_uuid128_t AUTH_CHR_STAT_UUID = AUTH_CHR_STAT_UUID_REG;
+static const ble_uuid128_t AUTH_CHR_CHG_UUID  = AUTH_CHR_CHG_UUID_REG;
+static const ble_uuid128_t AUTH_CHR_LST_UUID  = AUTH_CHR_LST_UUID_REG;
+static const ble_uuid128_t AUTH_CHR_DEL_UUID  = AUTH_CHR_DEL_UUID_REG;
+static const ble_uuid128_t AUTH_CHR_NAME_UUID = AUTH_CHR_NAME_UUID_REG;
 
 /* NimBLE 注册时把通知用的 value handle 交给 gatt_svc */
 void gatt_svc_set_handles(uint16_t time_req, uint16_t preset_data, uint16_t result);
@@ -500,6 +543,55 @@ static const struct ble_gatt_svc_def gatt_svr_svcs[] = {
                 .access_cb = sched_svc_callback,
                 .flags = BLE_GATT_CHR_F_READ,
                 .arg = (void *)(intptr_t)11
+            },
+            { 0 }
+        }
+    },
+    {
+        .type = BLE_GATT_SVC_TYPE_PRIMARY,
+        .uuid = &AUTH_SVC_UUID.u,
+        .characteristics = (struct ble_gatt_chr_def[]) {
+            {
+                .uuid = &AUTH_CHR_ID_UUID.u,
+                .access_cb = auth_svc_callback,
+                .flags = BLE_GATT_CHR_F_WRITE,
+                .arg = (void *)(intptr_t)1
+            },
+            {
+                .uuid = &AUTH_CHR_PIN_UUID.u,
+                .access_cb = auth_svc_callback,
+                .flags = BLE_GATT_CHR_F_WRITE,
+                .arg = (void *)(intptr_t)2
+            },
+            {
+                .uuid = &AUTH_CHR_STAT_UUID.u,
+                .access_cb = auth_svc_callback,
+                .flags = BLE_GATT_CHR_F_READ,
+                .arg = (void *)(intptr_t)3
+            },
+            {
+                .uuid = &AUTH_CHR_CHG_UUID.u,
+                .access_cb = auth_svc_callback,
+                .flags = BLE_GATT_CHR_F_WRITE,
+                .arg = (void *)(intptr_t)4
+            },
+            {
+                .uuid = &AUTH_CHR_LST_UUID.u,
+                .access_cb = auth_svc_callback,
+                .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_WRITE,
+                .arg = (void *)(intptr_t)5
+            },
+            {
+                .uuid = &AUTH_CHR_DEL_UUID.u,
+                .access_cb = auth_svc_callback,
+                .flags = BLE_GATT_CHR_F_WRITE,
+                .arg = (void *)(intptr_t)6
+            },
+            {
+                .uuid = &AUTH_CHR_NAME_UUID.u,
+                .access_cb = auth_svc_callback,
+                .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_WRITE,
+                .arg = (void *)(intptr_t)7
             },
             { 0 }
         }

@@ -10,6 +10,7 @@
  */
 
 #include "task/gatt_svc.h"
+#include "task/auth_svc.h"
 
 #include "driver/led_strip/light_mode_driver.h"
 #include "driver/preset/light_preset.h"
@@ -139,6 +140,10 @@ int time_svc_callback(uint16_t conn_handle, uint16_t attr_handle,
 {
     (void)attr_handle;
     uintptr_t which = (uintptr_t)arg;
+    int locked = auth_guard();
+    if (locked != 0) {
+        return locked;
+    }
 
     if (which == 1 && ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR) {
         uint8_t pkt[8];
@@ -257,6 +262,10 @@ int preset_svc_callback(uint16_t conn_handle, uint16_t attr_handle,
 {
     (void)attr_handle;
     uintptr_t which = (uintptr_t)arg;
+    int locked = auth_guard();
+    if (locked != 0) {
+        return locked;
+    }
 
     if (which == 1 && ctxt->op == BLE_GATT_ACCESS_OP_READ_CHR) {
         uint8_t ids[LIGHT_PRESET_USER_MAX + 8];
@@ -351,6 +360,10 @@ int sched_svc_callback(uint16_t conn_handle, uint16_t attr_handle,
 {
     (void)attr_handle;
     uintptr_t which = (uintptr_t)arg;
+    int locked = auth_guard();
+    if (locked != 0) {
+        return locked;
+    }
 
     if (which == 1 && ctxt->op == BLE_GATT_ACCESS_OP_READ_CHR) {
         uint8_t ids[CLOCK_SCHED_MAX];

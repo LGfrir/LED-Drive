@@ -23,6 +23,7 @@
  */
 
 #include "task/gatt_svc.h"
+#include "task/auth_svc.h"
 
 #include "driver/led_strip/light_mode_driver.h"
 #include "task/clock_scheduler.h"
@@ -77,6 +78,10 @@ int io_svc_callback(uint16_t conn_handle, uint16_t attr_handle,
     intptr_t which = (intptr_t)arg;
     (void)conn_handle;
     (void)attr_handle;
+    int locked = auth_guard();
+    if (locked != 0) {
+        return locked;
+    }
 
     if (ctxt->op == BLE_GATT_ACCESS_OP_READ_CHR) {
         switch (which) {
@@ -170,6 +175,10 @@ int light_svc_callback(uint16_t conn_handle, uint16_t attr_handle,
     intptr_t which = (intptr_t)arg;
     (void)conn_handle;
     (void)attr_handle;
+    int locked = auth_guard();
+    if (locked != 0) {
+        return locked;
+    }
 
     if (ctxt->op == BLE_GATT_ACCESS_OP_READ_CHR) {
         switch (which) {
@@ -376,6 +385,10 @@ int config_svc_callback(uint16_t conn_handle, uint16_t attr_handle,
     light_mode_t which = (light_mode_t)(intptr_t)arg;
     (void)conn_handle;
     (void)attr_handle;
+    int locked = auth_guard();
+    if (locked != 0) {
+        return locked;
+    }
 
     if (ctxt->op == BLE_GATT_ACCESS_OP_READ_CHR) {
         return read_selected(which, ctxt);
