@@ -2,18 +2,29 @@ package com.lgfrir.leddrivebt.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -36,8 +47,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
@@ -46,6 +61,9 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.lgfrir.leddrivebt.ble.OtaLocalServer
 import com.lgfrir.leddrivebt.ui.theme.AppType
 import com.lgfrir.leddrivebt.ui.theme.MinTouchTarget
@@ -53,6 +71,7 @@ import com.lgfrir.leddrivebt.ui.theme.Radius
 import com.lgfrir.leddrivebt.ui.theme.Space
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 import kotlin.math.roundToInt
 
 /*
@@ -594,6 +613,13 @@ fun OtaScreen(
         if (state.source == OtaSource.Hotspot) actions.onRefreshLocalNetwork()
     }
 
+    if (state.phase == OtaPhase.Starting ||
+        state.phase == OtaPhase.Downloading ||
+        state.phase == OtaPhase.Verifying
+    ) {
+        OtaProgressDialog(state = state, onCancel = actions.onCancel)
+    }
+
     Column(
         modifier
             .fillMaxWidth()
@@ -619,6 +645,220 @@ fun OtaScreen(
     }
 }
 
+/** 升级进行中的全屏进度界面；只在 Starting / Downloading / Verifying 时出现。 */
+@Composable
+private fun OtaProgressDialog(state: OtaUiState, onCancel: () -> Unit) {
+    Dialog(
+        onDismissRequest = {},
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            dismissOnBackPress = false,
+            dismissOnClickOutside = false,
+        ),
+    ) {
+        OtaProgressScreen(state = state, onCancel = onCancel)
+    }
+}
+
+@Composable
+private fun OtaProgressScreen(state: OtaUiState, onCancel: () -> Unit) {
+    val palette = LocalPalette.current
+    val animated by animateFloatAsState(
+        targetValue = state.progress.coerceIn(0f, 1f),
+        animationSpec = tween(durationMillis = 420),
+        label = "ota-progress",
+    )
+    val endless = rememberInfiniteTransition(label = "ota-ring")
+    val spin by endless.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 2200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "ota-spin",
+    )
+
+    val title = when (state.phase) {
+        OtaPhase.Starting -> "正在连接设备"
+        OtaPhase.Downloading -> "正在下载固件"
+        OtaPhase.Verifying -> "正在校验固件"
+        else -> "正在升级"
+    }
+    val step = when (state.phase) {
+        OtaPhase.Starting -> 0
+        OtaPhase.Downloading -> 1
+        OtaPhase.Verifying -> 2
+        else -> 3
+    }
+    val sourceLabel = buildString {
+        append(if (state.source == OtaSource.Server) "远程 HTTPS" else "手机本地服务")
+        if (state.source == OtaSource.Hotspot) {
+            append(" · ")
+            append(state.localMode.label)
+        }
+    }
+    val fileName = state.localFile?.name
+        ?: state.serverUrl.takeIf { it.isNotBlank() }
+        ?: "固件文件"
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(palette.page, palette.surface),
+                ),
+            ),
+    ) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(horizontal = Space.x4, vertical = Space.x6),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    "FIRMWARE UPDATE",
+                    color = palette.accent,
+                    style = AppType.caption,
+                    letterSpacing = 2.sp,
+                )
+                Spacer(Modifier.height(Space.x4))
+
+                Box(
+                    Modifier.size(214.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Canvas(Modifier.fillMaxSize()) {
+                        val stroke = 11.dp.toPx()
+                        drawCircle(
+                            color = palette.hairline.copy(alpha = 0.38f),
+                            style = Stroke(width = stroke),
+                        )
+                        drawArc(
+                            color = palette.accent,
+                            startAngle = -90f,
+                            sweepAngle = 360f * animated,
+                            useCenter = false,
+                            style = Stroke(width = stroke, cap = StrokeCap.Round),
+                        )
+                    }
+                    Canvas(
+                        Modifier
+                            .fillMaxSize()
+                            .rotate(spin),
+                    ) {
+                        drawArc(
+                            color = palette.accent.copy(alpha = 0.55f),
+                            startAngle = 0f,
+                            sweepAngle = 26f,
+                            useCenter = false,
+                            style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round),
+                        )
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            "${(animated * 100).roundToInt()}%",
+                            color = palette.text,
+                            style = AppType.title.copy(fontSize = 44.sp),
+                        )
+                        Text(
+                            state.phase.label,
+                            color = palette.muted,
+                            style = AppType.caption,
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(Space.x4))
+                Text(title, color = palette.text, style = AppType.strong)
+                Text(
+                    state.message,
+                    color = palette.muted,
+                    style = AppType.caption,
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = Space.x1, start = Space.x2, end = Space.x2),
+                )
+            }
+
+            Column(
+                Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(Radius.medium))
+                        .background(palette.surfaceHigh.copy(alpha = 0.55f))
+                        .padding(horizontal = Space.x3, vertical = Space.x2),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(sourceLabel, color = palette.accent, style = AppType.caption)
+                        Text(
+                            fileName,
+                            color = palette.text,
+                            style = AppType.body,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(top = 2.dp),
+                        )
+                    }
+                    if (state.localFile != null) {
+                        Text(
+                            formatByteCount(state.localFile.size),
+                            color = palette.muted,
+                            style = AppType.caption,
+                        )
+                    }
+                }
+
+                Row(
+                    Modifier.fillMaxWidth().padding(top = Space.x4),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                ) {
+                    listOf("准备", "下载", "校验", "重启").forEachIndexed { index, label ->
+                        val active = index <= step
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Box(
+                                Modifier
+                                    .size(if (index == step) 10.dp else 8.dp)
+                                    .clip(CircleShape)
+                                    .background(if (active) palette.accent else palette.hairline),
+                            )
+                            Text(
+                                label,
+                                color = if (active) palette.text else palette.muted,
+                                style = AppType.caption,
+                                modifier = Modifier.padding(top = Space.x1),
+                            )
+                        }
+                    }
+                }
+
+                OutlinedButton(
+                    onClick = onCancel,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = Space.x4)
+                        .heightIn(min = MinTouchTarget),
+                ) { Text("取消升级") }
+                Text(
+                    "升级期间请保持 APP 在前台。取消后设备仍运行原固件；若已进入校验/重启阶段，结果以设备回报为准。",
+                    color = palette.muted,
+                    style = AppType.caption,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = Space.x2),
+                )
+            }
+        }
+    }
+}
+
 /** 页面顶部说清楚两种模式各自做什么、本地模式的边界在哪里。 */
 @Composable
 private fun OtaNotice() {
@@ -637,8 +877,7 @@ private fun OtaNotice() {
         Text(
             "本地模式会先把固件复制到手机缓存，启动本机 HTTP 服务，再通过 BLE 把手机 WiFi 地址、" +
                 "端口、随机 token 和 SHA-256 发给灯带，由灯带自己下载。远程服务器模式保持原样。" +
-                "手机热点（LocalOnlyHotspot）和前台服务还没有实现：本页不能把手机变成热点，" +
-                "升级期间请让 App 留在前台。",
+                "手机热点需要先在系统设置手动开启，频段必须选 2.4GHz；升级期间请让 App 留在前台。",
             color = palette.muted,
             style = AppType.caption,
             modifier = Modifier.padding(top = Space.x1),
