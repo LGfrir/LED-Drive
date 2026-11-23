@@ -130,6 +130,14 @@ data class OtaUiState(
     val message: String = "",
 )
 
+/** 本地持久化的 OTA 输入，不含固件文件。 */
+data class OtaSaved(
+    val ssid: String = "",
+    val password: String = "",
+    val localMode: OtaLocalMode = OtaLocalMode.Hotspot,
+    val serverUrl: String = "",
+)
+
 /** 真正交给设备端的请求。字段顺序和固件 START 命令一致。 */
 data class OtaRequest(
     val source: OtaSource,
@@ -187,9 +195,29 @@ data class OtaActions(
 class OtaController(
     private val wifiIpv4: (() -> String?)? = null,
     private val hotspotIpv4: (() -> String?)? = null,
+    initial: OtaSaved? = null,
+    private val onSave: ((OtaSaved) -> Unit)? = null,
 ) {
-    var state by mutableStateOf(OtaUiState())
+    var state by mutableStateOf(
+        OtaUiState(
+            localMode = initial?.localMode ?: OtaLocalMode.Hotspot,
+            serverUrl = initial?.serverUrl ?: "",
+            wifiSsid = initial?.ssid ?: "",
+            wifiPassword = initial?.password ?: "",
+        ),
+    )
         private set
+
+    private fun persist() {
+        onSave?.invoke(
+            OtaSaved(
+                ssid = state.wifiSsid,
+                password = state.wifiPassword,
+                localMode = state.localMode,
+                serverUrl = state.serverUrl,
+            ),
+        )
+    }
 
     /**
      * 设备端/传输层实现。LightViewModel 里赋成 [OtaBleLink]。
@@ -222,19 +250,23 @@ class OtaController(
     fun selectLocalMode(mode: OtaLocalMode) {
         if (state.phase.busy || state.localMode == mode) return
         state = state.copy(localMode = mode, message = "")
+        persist()
         refreshLocalNetwork(quiet = true)
     }
 
     fun setServerUrl(url: String) {
         state = state.copy(serverUrl = url, message = "")
+        persist()
     }
 
     fun setWifiSsid(ssid: String) {
         state = state.copy(wifiSsid = ssid, message = "")
+        persist()
     }
 
     fun setWifiPassword(password: String) {
         state = state.copy(wifiPassword = password, message = "")
+        persist()
     }
 
     /** 手机 WiFi IPv4 的当前值，取自注入的读取器；OtaBleLink 也用它拼 URL。 */
@@ -807,13 +839,14 @@ internal fun OtaField(
             Row(
                 Modifier
                     .fillMaxWidth()
+                    .height(52.dp)
                     .clip(shape)
                     .background(palette.surfaceHigh.copy(alpha = 0.72f))
                     .border(1.dp, palette.hairline, shape)
-                    .padding(start = Space.x3, end = Space.x1, top = Space.x1, bottom = Space.x1),
+                    .padding(start = Space.x3, end = Space.x1),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Box(Modifier.weight(1f)) {
+                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
                     if (value.isEmpty()) {
                         Text(placeholder, color = palette.muted, style = AppType.body)
                     }

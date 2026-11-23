@@ -120,9 +120,31 @@ class LightViewModel(app: Application) : AndroidViewModel(app) {
      * OTA 页面状态。link 在 init 里装成 [OtaBleLink]，复用现有 BLE 连接。
      * 手机 WiFi IPv4 的读取器在这里注入，controller 本身不持有 Context。
      */
+    private val otaPrefs = app.getSharedPreferences("ota_prefs", 0)
+    private val savedOta = OtaSaved(
+        ssid = otaPrefs.getString("ssid", "").orEmpty(),
+        password = otaPrefs.getString("password", "").orEmpty(),
+        localMode = runCatching {
+            OtaLocalMode.valueOf(
+                otaPrefs.getString("local_mode", OtaLocalMode.Hotspot.name)
+                    ?: OtaLocalMode.Hotspot.name,
+            )
+        }.getOrDefault(OtaLocalMode.Hotspot),
+        serverUrl = otaPrefs.getString("server_url", "").orEmpty(),
+    )
+
     val ota = OtaController(
         wifiIpv4 = { phoneWifiIpv4(app) },
         hotspotIpv4 = { phoneHotspotIpv4() },
+        initial = savedOta,
+        onSave = { saved ->
+            otaPrefs.edit()
+                .putString("ssid", saved.ssid)
+                .putString("password", saved.password)
+                .putString("local_mode", saved.localMode.name)
+                .putString("server_url", saved.serverUrl)
+                .apply()
+        },
     )
     val ioModes = ble.ioModes
     val clockStat = ble.clockStat

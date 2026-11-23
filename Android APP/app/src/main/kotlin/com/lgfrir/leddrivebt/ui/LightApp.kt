@@ -216,6 +216,7 @@ fun LightApp(model: LightViewModel) {
     val synced by model.synced.collectAsStateWithLifecycle()
     val deviceEpoch by model.deviceEpoch.collectAsStateWithLifecycle()
     val peerName by model.peerName.collectAsStateWithLifecycle()
+    val deviceName by model.deviceName.collectAsStateWithLifecycle()
     val epochMark by model.epochMark.collectAsStateWithLifecycle()
     val connecting = ui.phase == LinkPhase.Connecting
     // 连接一结束就收起，不额外停留。
@@ -804,7 +805,11 @@ fun LightApp(model: LightViewModel) {
                                         )
                                     }
                                     AppChrome(
-                                        title = if (ui.page == Page.Scan) "LEDDrive" else peerName.ifBlank { "灯带" },
+                                        title = if (ui.page == Page.Scan) {
+                                            "LEDDrive"
+                                        } else {
+                                            (deviceName ?: peerName).ifBlank { "灯带" }
+                                        },
                                         onMenu = { desk = Desk.Settings },
                                         actions = {
                                             if (ui.page == Page.Strip) {
