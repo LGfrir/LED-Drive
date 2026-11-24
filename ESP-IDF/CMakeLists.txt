@@ -7,5 +7,5 @@ include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 idf_build_set_property(MINIMAL_BUILD ON)
 
 # OTA compares this string; keep it in semver form.
-set(PROJECT_VER "1.0.3")
+set(PROJECT_VER "1.0.4")
 project(LEDDrive)

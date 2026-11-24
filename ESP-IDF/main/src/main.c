@@ -2,7 +2,7 @@
  * @file main.c
  * @author LG_frir
  * @date 2026-11-11
- * @brief 两路灯带，每路 160 颗、三段 32 + 96 + 32。
+ * @brief 两路灯带，每路 172 颗、三段 36 + 100 + 36。
  *
  * IO1：GPIO14，段 id 1-3，RMT + DMA
  * IO2：GPIO4， 段 id 4-6，SPI2 MOSI + DMA（SCLK GPIO5，只给 SPI 时钟，不接灯带）
@@ -52,7 +52,7 @@ static const lcd_pins_t s_lcd_pins = LCD_PINS_LEDDRIVE_ORIG;
 #endif
 
 /*
- * 两路，每路 160 颗，三段 32 + 96 + 32。
+ * 两路，每路 172 颗，三段 36 + 100 + 36。
  *
  * IO1 走 RMT：ESP32-S3 的 4 个 RMT 发送通道里只有【最后一个】能挂 DMA
  * （见 esp_driver_rmt/src/rmt_tx.c 的 rmt_tx_register_to_group）。
@@ -62,15 +62,15 @@ static const lcd_pins_t s_lcd_pins = LCD_PINS_LEDDRIVE_ORIG;
  * 最大的那条灯带上；led_count 相同时按 io_id 升序，启动分配结果稳定。
  */
 static const light_seg_desc_t s_segs_io1[] = {
-    { .id = 1, .length = 32, .name = "右" },
-    { .id = 2, .length = 96, .name = "中" },
-    { .id = 3, .length = 32, .name = "左" },
+    { .id = 1, .length = 36, .name = "右" },
+    { .id = 2, .length = 100, .name = "中" },
+    { .id = 3, .length = 36, .name = "左" },
 };
 
 static const light_seg_desc_t s_segs_io2[] = {
-    { .id = 4, .length = 32, .name = "右" },
-    { .id = 5, .length = 96, .name = "中" },
-    { .id = 6, .length = 32, .name = "左" },
+    { .id = 4, .length = 36, .name = "右" },
+    { .id = 5, .length = 100, .name = "中" },
+    { .id = 6, .length = 36, .name = "左" },
 };
 
 typedef enum {
@@ -91,9 +91,9 @@ typedef struct {
 
 static const io_desc_t s_ios[] = {
     { .io_id = 1, .name = "笔记本", .gpio = IO1_GPIO, .bus = IO_BUS_RMT,
-      .led_count = 160, .segs = s_segs_io1, .seg_count = 3 },
+      .led_count = 172, .segs = s_segs_io1, .seg_count = 3 },
     { .io_id = 2, .name = "手办",   .gpio = IO2_GPIO, .sclk = GPIO_NUM_5,
-      .bus = IO_BUS_SPI, .led_count = 160, .segs = s_segs_io2, .seg_count = 3 },
+      .bus = IO_BUS_SPI, .led_count = 172, .segs = s_segs_io2, .seg_count = 3 },
 };
 
 /*
@@ -173,7 +173,7 @@ void app_main(void)
                  ws2812_rmt_has_dma(strip) ? "DMA" : "48符号补数",
                  light_refresh_floor_for(d->led_count, ws2812_rmt_has_dma(strip)));
     }
-    ESP_LOGI(TAG, "共 2 路、6 个灯段，每路 160 颗（32+96+32）");
+    ESP_LOGI(TAG, "共 2 路、6 个灯段，每路 172 颗（36+100+36）");
     ESP_LOGW(TAG, "IO1 走 RMT DMA；IO2 走 SPI2 DMA（SCLK GPIO5 不接灯带），"
                   "不再抢 RMT 的 48 符号补数");
 
