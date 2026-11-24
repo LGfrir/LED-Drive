@@ -312,8 +312,8 @@ void ws2812_rmt_set_pixel(ws2812_rmt_handle_t *bus, uint16_t index, uint8_t r, u
         return;
     }
     uint8_t *px = &bus->frame[index * 3];
-    px[0] = g;
-    px[1] = r;
+    px[0] = r;
+    px[1] = g;
     px[2] = b;
 }
 
